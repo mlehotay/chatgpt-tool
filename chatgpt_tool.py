@@ -4,25 +4,6 @@ import os
 import shutil
 import sqlite3
 
-"""
-ChatGPT Tool
-
-Features:
-- Command-line interface:
-    - Accept command-line arguments for importing or printing
-    - Accept command-line arguments for the database name and data files to import
-    - Make all command-line arguments optional
-- Default behavior:
-    - If no command-line arguments are provided, it tries to import data using the default settings
-- Entry point:
-    - Invokes importing or printing functionality based on the command-line arguments
-
-To Do:
-- Help text and usage information:
-    - Provide a help message that explains the available command-line arguments and their usage
-- Error handling:
-    - Handle errors related to command-line arguments, SQLite operations, etc
-"""
 
 class ChatGPTTool:
     DEFAULT_DB_NAME = "chatgpt.db"
@@ -82,12 +63,18 @@ class ChatGPTTool:
 
             # Check if the JSON data is a list or a single object
             if isinstance(json_data, list):
-                # List of objects
                 if json_data:
-                    # Get the column names from the first object
-                    column_names = json_data[0].keys()
+                    first_object = json_data[0]
+                    id_field_name = next((key for key in first_object.keys() if key.lower() == "id"), None)
+                    if not id_field_name:
+                        print(f"Skipping import for file: {file_path} (no 'id' field found)")
+                        continue
+                    column_names = first_object.keys()
             else:
-                # Single object
+                id_field_name = next((key for key in json_data.keys() if key.lower() == "id"), None)
+                if not id_field_name:
+                    print(f"Skipping import for file: {file_path} (no 'id' field found)")
+                    continue
                 column_names = json_data.keys()
 
             # Create a table for the current data
@@ -95,21 +82,21 @@ class ChatGPTTool:
             for column_name in column_names:
                 create_table_query += f"{column_name} TEXT,"
             create_table_query = create_table_query.rstrip(',')
-            create_table_query += ")"
+            create_table_query += f", CONSTRAINT unique_{table_name} UNIQUE ({id_field_name}))"
             cursor.execute(create_table_query)
 
             # Insert data into the table
             if isinstance(json_data, list):
                 for item in json_data:
                     values = tuple(str(value) for value in item.values())
-                    insert_query = f"INSERT INTO {table_name} VALUES ({','.join(['?'] * len(values))})"
+                    insert_query = f"INSERT OR IGNORE INTO {table_name} ({','.join(item.keys())}) VALUES ({','.join(['?'] * len(values))})"
                     cursor.execute(insert_query, values)
             else:
                 values = tuple(str(value) for value in json_data.values())
                 if len(column_names) != len(values):
                     print(f"Skipping import for file: {file_path} (column count mismatch)")
                     continue
-                insert_query = f"INSERT INTO {table_name} VALUES ({','.join(['?'] * len(values))})"
+                insert_query = f"INSERT OR IGNORE INTO {table_name} ({','.join(json_data.keys())}) VALUES ({','.join(['?'] * len(values))})"
                 cursor.execute(insert_query, values)
 
         conn.commit()
@@ -163,7 +150,6 @@ class ChatGPTTool:
             # No subcommand specified, try to import using default settings
             print("Action: Import using default settings")
             self.import_data(self.DEFAULT_DB_NAME, None)
-
 
 if __name__ == "__main__":
     tool = ChatGPTTool()
