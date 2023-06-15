@@ -15,6 +15,7 @@ class ChatGPTTool:
 
         self.setup_import_command()
         self.setup_print_command()
+        self.setup_delete_command()
 
     def setup_import_command(self):
         # Create the 'import' subcommand parser
@@ -26,6 +27,11 @@ class ChatGPTTool:
         # Create the 'print' subcommand parser
         print_parser = self.subparsers.add_parser("print", help="Print the content of the SQLite database tables")
         print_parser.add_argument("-d", "--db-name", type=str, default=self.DEFAULT_DB_NAME, help="SQLite database name")
+
+    def setup_delete_command(self):
+        # Create the 'delete' subcommand parser
+        delete_parser = self.subparsers.add_parser("delete", help="Delete the SQLite database file")
+        delete_parser.add_argument("-d", "--db-name", type=str, default=self.DEFAULT_DB_NAME, help="SQLite database name")
 
     def import_data(self, db_name, data_files):
         data_files = data_files or self.get_data_files()
@@ -78,11 +84,12 @@ class ChatGPTTool:
                 column_names = json_data.keys()
 
             # Create a table for the current data
-            create_table_query = f"CREATE TABLE IF NOT EXISTS {table_name} ("
+            create_table_query = f"CREATE TABLE IF NOT EXISTS {table_name} ({id_field_name} TEXT PRIMARY KEY,"
             for column_name in column_names:
-                create_table_query += f"{column_name} TEXT,"
+                if column_name.lower() != id_field_name.lower():
+                    create_table_query += f"{column_name} TEXT,"
             create_table_query = create_table_query.rstrip(',')
-            create_table_query += f", CONSTRAINT unique_{table_name} UNIQUE ({id_field_name}))"
+            create_table_query += ")"
             cursor.execute(create_table_query)
 
             # Insert data into the table
@@ -128,6 +135,13 @@ class ChatGPTTool:
 
         conn.close()
 
+    def delete_database(self, db_name):
+        try:
+            os.remove(db_name)
+            print(f"Deleted database: {db_name}")
+        except FileNotFoundError:
+            print(f"Database not found: {db_name}")
+
     def truncate_string(self, string, max_length):
         if len(string) <= max_length:
             return string
@@ -146,10 +160,14 @@ class ChatGPTTool:
         elif args.subcommand == "print":
             print("Action: Print tables")
             self.print_tables(args.db_name)
+        elif args.subcommand == "delete":
+            print("Action: Delete database")
+            self.delete_database(args.db_name)
         else:
             # No subcommand specified, try to import using default settings
             print("Action: Import using default settings")
             self.import_data(self.DEFAULT_DB_NAME, None)
+
 
 if __name__ == "__main__":
     tool = ChatGPTTool()
