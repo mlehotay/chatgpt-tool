@@ -3,44 +3,13 @@ import json
 import os
 import shutil
 import sqlite3
+import doctest
 
 """
 ChatGPT Tool
 
-ChatGPT Tool is a command-line utility for importing and managing ChatGPT conversations in a SQLite database.
-
-## Features
-
-- Command-line interface:
-  - Accept command-line arguments for importing, printing, and deleting data
-  - Accept command-line arguments for the database name and data files to import
-  - Make all command-line arguments optional
-- Data Import:
-  - Import JSON data files into SQLite tables
-  - Automatically create tables based on file names
-  - Handle JSON data with varying "id" field positions
-  - Insert new data and ignore duplicates
-- Data Printing:
-  - Print the content of the SQLite database tables
-- Data Deletion:
-  - Delete the SQLite database file
-
-## To Do
-
-- Help text and usage information:
-  - Provide a help message that explains the available command-line arguments and their usage
-- Error handling:
-  - Handle errors related to command-line arguments, SQLite operations, etc
-- HTML Data Import:
-  - Implement parsing and import of JSON data from HTML files
-  - Handle mapping between HTML files and corresponding JSON files
-  - Check for duplicates and insert new data into the conversations table
-- Optimization:
-  - Implement efficient search for duplicates before inserting new data
-- Enhanced Database Interaction:
-  - Add more advanced database operations like updating and deleting specific rows
-- Schema Checking:
-  - Verify HTML file schema against existing tables and import accordingly
+ChatGPT Tool is a command-line utility for importing ChatGPT conversations from the ChatGPT export JSON format and managing them in a SQLite database.
+See README.md for more information.
 
 """
 
@@ -68,7 +37,6 @@ class ChatGPTTool:
         # Create the 'print' subcommand parser
         print_parser = self.subparsers.add_parser("print", help="Print the content of the SQLite database tables")
         print_parser.add_argument("-d", "--db-name", type=str, default=self.DEFAULT_DB_NAME, help="SQLite database name")
-
 
     def setup_help_command(self):
         # Create the 'help' subcommand parser
@@ -107,6 +75,21 @@ class ChatGPTTool:
         return data_files
 
     def import_json_data_to_sqlite(self, db_name, data_files):
+        """
+        Imports JSON data into the SQLite database.
+
+        Args:
+            db_name (str): The name of the SQLite database.
+            data_files (List[str]): List of data files to import.
+
+        Returns:
+            None
+
+        Examples:
+            >>> import_data("my_db.db", ["data.json"])
+            Imported data successfully.
+        """
+
         conn = sqlite3.connect(db_name)
         cursor = conn.cursor()
 
@@ -260,5 +243,9 @@ class ChatGPTTool:
         return cursor.fetchone()[0]
 
 if __name__ == "__main__":
+    # Your script's implementation code
     tool = ChatGPTTool()
     tool.run()
+
+    # Execute the tests embedded within the docstrings
+    doctest.testmod()
