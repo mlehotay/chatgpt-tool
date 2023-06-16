@@ -4,6 +4,45 @@ import os
 import shutil
 import sqlite3
 
+"""
+ChatGPT Tool
+
+ChatGPT Tool is a command-line utility for importing and managing ChatGPT conversations in a SQLite database.
+
+## Features
+
+- Command-line interface:
+  - Accept command-line arguments for importing, printing, and deleting data
+  - Accept command-line arguments for the database name and data files to import
+  - Make all command-line arguments optional
+- Data Import:
+  - Import JSON data files into SQLite tables
+  - Automatically create tables based on file names
+  - Handle JSON data with varying "id" field positions
+  - Insert new data and ignore duplicates
+- Data Printing:
+  - Print the content of the SQLite database tables
+- Data Deletion:
+  - Delete the SQLite database file
+
+## To Do
+
+- Help text and usage information:
+  - Provide a help message that explains the available command-line arguments and their usage
+- Error handling:
+  - Handle errors related to command-line arguments, SQLite operations, etc
+- HTML Data Import:
+  - Implement parsing and import of JSON data from HTML files
+  - Handle mapping between HTML files and corresponding JSON files
+  - Check for duplicates and insert new data into the conversations table
+- Optimization:
+  - Implement efficient search for duplicates before inserting new data
+- Enhanced Database Interaction:
+  - Add more advanced database operations like updating and deleting specific rows
+- Schema Checking:
+  - Verify HTML file schema against existing tables and import accordingly
+
+"""
 
 class ChatGPTTool:
     DEFAULT_DB_NAME = "chatgpt.db"
@@ -15,7 +54,9 @@ class ChatGPTTool:
 
         self.setup_import_command()
         self.setup_print_command()
+        self.setup_help_command()
         self.setup_delete_command()
+        self.setup_info_command()
 
     def setup_import_command(self):
         # Create the 'import' subcommand parser
@@ -28,10 +69,26 @@ class ChatGPTTool:
         print_parser = self.subparsers.add_parser("print", help="Print the content of the SQLite database tables")
         print_parser.add_argument("-d", "--db-name", type=str, default=self.DEFAULT_DB_NAME, help="SQLite database name")
 
+
+    def setup_help_command(self):
+        # Create the 'help' subcommand parser
+        help_parser = self.subparsers.add_parser("help", help="Show usage information for the tool")
+        help_subparsers = help_parser.add_subparsers(title="subcommands", dest="subcommand")
+
+        # Add subparsers for each subcommand
+        import_help_parser = help_subparsers.add_parser("import", help="Show usage information for the import subcommand")
+        print_help_parser = help_subparsers.add_parser("print", help="Show usage information for the print subcommand")
+        delete_help_parser = help_subparsers.add_parser("delete", help="Show usage information for the delete subcommand")
+        help_help_parser = help_subparsers.add_parser("help", help="Show usage information for the help subcommand")
+
     def setup_delete_command(self):
         # Create the 'delete' subcommand parser
         delete_parser = self.subparsers.add_parser("delete", help="Delete the SQLite database file")
         delete_parser.add_argument("-d", "--db-name", type=str, default=self.DEFAULT_DB_NAME, help="SQLite database name")
+
+    def setup_info_command(self):
+        # Create the 'info' subcommand parser
+        info_parser = self.subparsers.add_parser("info", help="Display statistics about the database and the data")
 
     def import_data(self, db_name, data_files):
         data_files = data_files or self.get_data_files()
@@ -142,6 +199,32 @@ class ChatGPTTool:
         except FileNotFoundError:
             print(f"Database not found: {db_name}")
 
+    def info(self, db_name):
+        # Connect to the database
+        conn = sqlite3.connect(db_name)
+        cursor = conn.cursor()
+
+        # Retrieve statistics about the tables
+        tables = self.get_table_names(cursor)
+        table_stats = []
+        for table in tables:
+            table_stats.append((table, self.get_table_count(cursor, table)))
+
+        # Display the statistics
+        print("Database Information:")
+        print(f"Database Name: {db_name}")
+        print(f"Number of Tables: {len(tables)}")
+        print()
+
+        print("Table Statistics:")
+        for table, count in table_stats:
+            print(f"Table Name: {table}")
+            print(f"Number of Rows: {count}")
+            print()
+
+        # Close the database connection
+        conn.close()
+
     def truncate_string(self, string, max_length):
         if len(string) <= max_length:
             return string
@@ -168,6 +251,13 @@ class ChatGPTTool:
             print("Action: Import using default settings")
             self.import_data(self.DEFAULT_DB_NAME, None)
 
+    def get_table_names(self, cursor):
+        cursor.execute("SELECT name FROM sqlite_master WHERE type='table';")
+        return [row[0] for row in cursor.fetchall()]
+
+    def get_table_count(self, cursor, table_name):
+        cursor.execute(f"SELECT COUNT(*) FROM {table_name};")
+        return cursor.fetchone()[0]
 
 if __name__ == "__main__":
     tool = ChatGPTTool()
