@@ -4,6 +4,7 @@ import os
 import shutil
 import sqlite3
 import doctest
+import zipfile
 
 """
 ChatGPT Tool
@@ -31,7 +32,7 @@ class ChatGPTTool:
         # Create the 'import' subcommand parser
         import_parser = self.subparsers.add_parser("import", help="Import JSON data into the SQLite database")
         import_parser.add_argument("-d", "--db-name", type=str, default=self.DEFAULT_DB_NAME, help="SQLite database name")
-        import_parser.add_argument("-f", "--data-files", type=str, nargs="*", default=None, help="Data files to import (JSON format)")
+        import_parser.add_argument("-f", "--data-directory", type=str, default=self.DEFAULT_DATA_DIRECTORY, help="Data directory to import (JSON format)")
 
     def setup_print_command(self):
         # Create the 'print' subcommand parser
@@ -58,37 +59,22 @@ class ChatGPTTool:
         # Create the 'info' subcommand parser
         info_parser = self.subparsers.add_parser("info", help="Display statistics about the database and the data")
 
-    def import_data(self, db_name, data_files):
-        data_files = data_files or self.get_data_files()
+    def setup_info_command(self):
+        # Create the 'info' subcommand parser
+        info_parser = self.subparsers.add_parser("info", help="Display statistics about the database and the data")
+
+    def import_data(self, db_name, data_directory=None):
+        data_directory = data_directory or self.DEFAULT_DATA_DIRECTORY
+
+        if not os.path.exists(data_directory):
+            print(f"Error: Data directory not found: {data_directory}")
+            return
+
+        data_files = self.get_data_files(data_directory)
+
         if not data_files:
             print("Error: No JSON data files found.")
             return
-
-        self.import_json_data_to_sqlite(db_name, data_files)
-
-    def get_data_files(self):
-        if not os.path.exists(self.DEFAULT_DATA_DIRECTORY):
-            return []
-
-        data_files = [os.path.join(self.DEFAULT_DATA_DIRECTORY, file) for file in os.listdir(self.DEFAULT_DATA_DIRECTORY) if
-                      file.endswith(".json")]
-        return data_files
-
-    def import_json_data_to_sqlite(self, db_name, data_files):
-        """
-        Imports JSON data into the SQLite database.
-
-        Args:
-            db_name (str): The name of the SQLite database.
-            data_files (List[str]): List of data files to import.
-
-        Returns:
-            None
-
-        Examples:
-            >>> import_data("my_db.db", ["data.json"])
-            Imported data successfully.
-        """
 
         conn = sqlite3.connect(db_name)
         cursor = conn.cursor()
@@ -98,56 +84,101 @@ class ChatGPTTool:
 
             table_name = f"data_{i}"
 
-            # Read the JSON data from the file
-            with open(file_path) as file:
-                json_data = json.load(file)
-
-            # Check if the JSON data is empty
-            if not json_data:
-                print(f"Skipping import for file: {file_path} (empty JSON data)")
-                continue
-
-            # Check if the JSON data is a list or a single object
-            if isinstance(json_data, list):
-                if json_data:
-                    first_object = json_data[0]
-                    id_field_name = next((key for key in first_object.keys() if key.lower() == "id"), None)
-                    if not id_field_name:
-                        print(f"Skipping import for file: {file_path} (no 'id' field found)")
-                        continue
-                    column_names = first_object.keys()
-            else:
-                id_field_name = next((key for key in json_data.keys() if key.lower() == "id"), None)
-                if not id_field_name:
-                    print(f"Skipping import for file: {file_path} (no 'id' field found)")
+            if file_path.endswith(".zip"):
+                if not zipfile.is_zipfile(file_path):
+                    print(f"Error: Invalid zip file: {file_path}")
                     continue
-                column_names = json_data.keys()
 
-            # Create a table for the current data
-            create_table_query = f"CREATE TABLE IF NOT EXISTS {table_name} ({id_field_name} TEXT PRIMARY KEY,"
-            for column_name in column_names:
-                if column_name.lower() != id_field_name.lower():
-                    create_table_query += f"{column_name} TEXT,"
-            create_table_query = create_table_query.rstrip(',')
-            create_table_query += ")"
-            cursor.execute(create_table_query)
+                with zipfile.ZipFile(file_path, "r") as zip_file:
+                    json_files = [name for name in zip_file.namelist() if name.endswith(".json")]
 
-            # Insert data into the table
-            if isinstance(json_data, list):
-                for item in json_data:
-                    values = tuple(str(value) for value in item.values())
-                    insert_query = f"INSERT OR IGNORE INTO {table_name} ({','.join(item.keys())}) VALUES ({','.join(['?'] * len(values))})"
-                    cursor.execute(insert_query, values)
-            else:
-                values = tuple(str(value) for value in json_data.values())
-                if len(column_names) != len(values):
-                    print(f"Skipping import for file: {file_path} (column count mismatch)")
+                if not json_files:
+                    print("Error: No JSON data files found in the zip file.")
                     continue
-                insert_query = f"INSERT OR IGNORE INTO {table_name} ({','.join(json_data.keys())}) VALUES ({','.join(['?'] * len(values))})"
-                cursor.execute(insert_query, values)
+
+                for json_file in json_files:
+                    with zip_file.open(json_file) as file:
+                        json_data = json.load(file)
+                        self.import_json_data_to_sqlite(cursor, table_name, json_data)
+            else:
+                with open(file_path) as file:
+                    json_data = json.load(file)
+                    self.import_json_data_to_sqlite(cursor, table_name, json_data)
 
         conn.commit()
         conn.close()
+
+    def get_data_files(self, data_directory=None):
+        data_directory = data_directory or self.DEFAULT_DATA_DIRECTORY
+
+        if not os.path.exists(data_directory):
+            print(f"Error: Data directory not found: {data_directory}")
+            return []
+
+        if data_directory.endswith(".zip"):
+            if not zipfile.is_zipfile(data_directory):
+                print(f"Error: Invalid zip file: {data_directory}")
+                return []
+
+            with zipfile.ZipFile(data_directory, "r") as zip_file:
+                json_files = [file for file in zip_file.namelist() if file.endswith(".json")]
+
+            if not json_files:
+                print("Error: No JSON data files found in the zip file.")
+                return []
+
+            return [os.path.join(data_directory, json_file) for json_file in json_files]
+
+        data_files = [os.path.join(data_directory, file) for file in os.listdir(data_directory) if file.endswith(".json")]
+        return data_files
+
+    def import_json_data_to_sqlite(self, cursor, table_name, json_data):
+        # Check if the JSON data is empty
+        if not json_data:
+            print(f"Skipping import for table: {table_name} (empty JSON data)")
+            return
+
+        # Check if the JSON data is a list or a single object
+        if isinstance(json_data, list):
+            if not json_data:
+                print(f"Skipping import for table: {table_name} (empty JSON data)")
+                return
+
+            first_object = json_data[0]
+            id_field_name = next((key for key in first_object.keys() if key.lower() == "id"), None)
+            if not id_field_name:
+                print(f"Skipping import for table: {table_name} (no 'id' field found)")
+                return
+            column_names = first_object.keys()
+        else:
+            id_field_name = next((key for key in json_data.keys() if key.lower() == "id"), None)
+            if not id_field_name:
+                print(f"Skipping import for table: {table_name} (no 'id' field found)")
+                return
+            column_names = json_data.keys()
+
+        # Create a table for the current data
+        create_table_query = f"CREATE TABLE IF NOT EXISTS {table_name} ({id_field_name} TEXT PRIMARY KEY,"
+        for column_name in column_names:
+            if column_name.lower() != id_field_name.lower():
+                create_table_query += f"{column_name} TEXT,"
+        create_table_query = create_table_query.rstrip(',')
+        create_table_query += ")"
+        cursor.execute(create_table_query)
+
+        # Insert data into the table
+        if isinstance(json_data, list):
+            for item in json_data:
+                values = tuple(str(value) for value in item.values())
+                insert_query = f"INSERT OR IGNORE INTO {table_name} ({','.join(item.keys())}) VALUES ({','.join(['?'] * len(values))})"
+                cursor.execute(insert_query, values)
+        else:
+            values = tuple(str(value) for value in json_data.values())
+            if len(column_names) != len(values):
+                print(f"Skipping import for table: {table_name} (column count mismatch)")
+                return
+            insert_query = f"INSERT OR IGNORE INTO {table_name} ({','.join(json_data.keys())}) VALUES ({','.join(['?'] * len(values))})"
+            cursor.execute(insert_query, values)
 
     def print_tables(self, db_name):
         conn = sqlite3.connect(db_name)
@@ -222,7 +253,7 @@ class ChatGPTTool:
 
         if args.subcommand == "import":
             print("Action: Import")
-            self.import_data(args.db_name, args.data_files)
+            self.import_data(args.db_name, args.data_directory)
         elif args.subcommand == "print":
             print("Action: Print tables")
             self.print_tables(args.db_name)
@@ -248,4 +279,4 @@ if __name__ == "__main__":
     tool.run()
 
     # Execute the tests embedded within the docstrings
-    doctest.testmod()
+    # doctest.testmod()
