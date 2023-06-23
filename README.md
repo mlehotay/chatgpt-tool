@@ -1,6 +1,50 @@
 # ChatGPT Tool
 
-ChatGPT Tool is a command-line utility for importing and managing ChatGPT conversations in a SQLite database.
+ChatGPT Tool is a command-line utility for importing ChatGPT conversations exported as JSON and managing them in a SQLite database. It can also import conversations from HTML files exported from the ChatGPT website. It is written in Python 3 and uses the sqlite3 module for database interaction.
+
+## Table of Contents
+
+- [ChatGPT Tool](#chatgpt-tool)
+  - [Table of Contents](#table-of-contents)
+  - [Features](#features)
+  - [Usage](#usage)
+  - [Dependencies](#dependencies)
+  - [To Do](#to-do)
+
+## Usage
+
+The ChatGPT Tool supports the following command-line arguments:
+
+- `import` subcommand:
+  - `-db, --database`: SQLite database name (default: `chatgpt.db`)
+  - `-d, --directory`: Directory containing data files to import (JSON format) (default: `data`)
+  - `-f, --data-files`: Data file to import (JSON format) (default: `conversations.json`)
+  - `-v, --verbose`: Display verbose output
+
+- `print` subcommand:
+  - `-db, --database`: SQLite database name (default: `chatgpt.db`)
+  - `-v, --verbose`: Display verbose output
+
+- `delete` subcommand:
+  - `-db, --database`: SQLite database name (default: `chatgpt.db`)
+  - `-v, --verbose`: Display verbose output
+
+- `info` subcommand:
+  - `-db, --database`: SQLite database name (default: `chatgpt.db`)
+  - `-v, --verbose`: Display verbose output
+
+- `help` subcommand:
+  - `-v, --verbose`: Display verbose output
+
+- `test` subcommand:
+  - `-u, --unit-tests`: Run unit tests
+  - `-d, --doctests`: Run doctests
+  - `-v, --verbose`: Display verbose output
+
+    Notes:
+        - Run test suites by invoking the `test` subcommand with the `-u` or `-d` options
+        - To discover new doctests, run `python3 -m doctest -v chatgpt_tool.py`
+        - New unit tests can be added to the `tests` directory
 
 ## Features
 
@@ -25,34 +69,23 @@ ChatGPT Tool is a command-line utility for importing and managing ChatGPT conver
     - https://docs.python.org/3/library/doctest.html
     - https://docs.python.org/3/library/unittest.html
     - python3 -m unittest discover tests
-
-## Usage
-
-The ChatGPT Tool supports the following command-line arguments:
-
-- `import` subcommand:
-  - `-d, --db-name`: SQLite database name (default: `chatgpt.db`)
-  - `-f, --data-files`: Data files to import (JSON format)
-
-- `print` subcommand:
-  - `-d, --db-name`: SQLite database name (default: `chatgpt.db`)
-
-- `delete` subcommand:
-  - `-d, --db-name`: SQLite database name (default: `chatgpt.db`)
-
-To import data, use the `import` subcommand with optional arguments. To print the content of the tables, use the `print` subcommand. To delete the database file, use the `delete` subcommand.
+    - python3 -m doctest -v chatgpt_tool.py
 
 ## Dependencies
 
 - Python 3.x
 - sqlite3
 - argparse
+- json
+- os
+- sys
+- unittest (for testing)
 - gazpacho (for HTML parsing, optional)
-
 
 ## To Do
 
 - Help text and usage information:
+
   - Provide a help message that explains the available command-line arguments and their usage
 
 - Error handling:
