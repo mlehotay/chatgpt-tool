@@ -11,35 +11,6 @@ ChatGPT Tool
 
 ChatGPT Tool is a command-line utility for importing ChatGPT conversations from the ChatGPT export JSON format and managing them in a SQLite database.
 
-Usage:
-    chatgpt_tool.py import [-d <db_name>] [-f <data_files>...]
-    chatgpt_tool.py print [-d <db_name>]
-    chatgpt_tool.py delete [-d <db_name>]
-    chatgpt_tool.py info [-d <db_name>]
-    chatgpt_tool.py help [command]
-    chatgpt_tool.py test [-v]
-
-Options:
-    -d <db_name> --db-name <db_name>  The name of the SQLite database [default: chatgpt.db]
-    -f <data_files> --data-files <data_files>  The data files to import (JSON format)
-    -v --verbose  Display verbose output
-
-Commands:
-    import  Import JSON data into the SQLite database
-    print  Print the content of the SQLite database tables
-    delete  Delete the SQLite database file
-    info  Display statistics about the database and the data
-    help  Show usage information for the tool
-    test  Run the doctests
-
-Examples:
-    chatgpt_tool.py import -d chatgpt.db -f data.json
-    chatgpt_tool.py print -d chatgpt.db
-    chatgpt_tool.py delete -d chatgpt.db
-    chatgpt_tool.py info
-    chatgpt_tool.py help
-    chatgpt_tool.py test -v
-
 See README.md for more information.
 """
 
@@ -382,6 +353,79 @@ class ChatGPTTool:
             print("Running doctests...")
         doctest.testmod(verbose=verbose)
 
+# export
+
+    def setup_export_command(self):
+        # Create the 'export' subcommand parser
+        export_parser = self.subparsers.add_parser("export", help="Export conversations from the SQLite database to JSON format")
+        export_parser.add_argument("-d", "--db-name", type=str, default=self.DEFAULT_DB_NAME, help="SQLite database name")
+        export_parser.add_argument("-o", "--output-directory", type=str, default=self.DEFAULT_DATA_DIRECTORY, help="Output directory to export conversations (JSON format)")
+
+    def export_conversations(self, db_name, output_directory=None):
+        output_directory = output_directory or self.DEFAULT_DATA_DIRECTORY
+
+        if not os.path.exists(output_directory):
+            os.makedirs(output_directory)
+
+        conn = sqlite3.connect(db_name)
+        cursor = conn.cursor()
+
+        tables = self.get_table_names(cursor)
+
+        for table in tables:
+            json_data = self.export_table_as_json(cursor, table)
+
+            if json_data:
+                output_file = os.path.join(output_directory, f"{table}.json")
+
+                with open(output_file, "w") as file:
+                    json.dump(json_data, file, indent=4)
+
+                print(f"Exported conversations from table: {table}")
+
+        conn.close()
+
+    def export_table_as_json(self, cursor, table_name):
+        cursor.execute(f"SELECT * FROM {table_name}")
+        rows = cursor.fetchall()
+
+        column_names = [column[0] for column in cursor.description]
+        json_data = []
+
+        for row in rows:
+            conversation = dict(zip(column_names, row))
+            json_data.append(conversation)
+
+        return json_data
+
+# conversation
+
+    def setup_conversation_command(self):
+        # Create the 'conversation' subcommand parser
+        conversation_parser = self.subparsers.add_parser("conversation", help="Print a conversation from the SQLite database")
+        conversation_parser.add_argument("-d", "--db-name", type=str, default=self.DEFAULT_DB_NAME, help="SQLite database name")
+        conversation_parser.add_argument("-t", "--table", type=str, required=True, help="Table name containing the conversation")
+        conversation_parser.add_argument("-i", "--id", type=str, required=True, help="ID of the conversation")
+
+    def print_conversation(self, db_name, table_name, conversation_id):
+        conn = sqlite3.connect(db_name)
+        cursor = conn.cursor()
+
+        cursor.execute(f"SELECT * FROM {table_name} WHERE id = ?", (conversation_id,))
+        row = cursor.fetchone()
+
+        if row:
+            column_names = [column[0] for column in cursor.description]
+            conversation = dict(zip(column_names, row))
+
+            print(f"Conversation ID: {conversation_id}")
+            for key, value in conversation.items():
+                print(f"{key}: {value}")
+        else:
+            print(f"Conversation not found: {conversation_id}")
+
+        conn.close()
+
 # utility functions
 
     def truncate_string(self, string, max_length):
@@ -392,6 +436,16 @@ class ChatGPTTool:
     def get_truncation_length(self):
         terminal_size = shutil.get_terminal_size(fallback=(80, 24))
         return terminal_size.columns - 3  # Subtract 3 to account for ellipsis
+
+# database functions
+
+    def get_table_names(self, cursor):
+        cursor.execute("SELECT name FROM sqlite_master WHERE type='table';")
+        return [row[0] for row in cursor.fetchall()]
+
+    def get_table_count(self, cursor, table_name):
+        cursor.execute(f"SELECT COUNT(*) FROM {table_name};")
+        return cursor.fetchone()[0]
 
 # run
 
@@ -427,16 +481,6 @@ class ChatGPTTool:
             # No subcommand specified, try to import using default settings
             print("Action: Import using default settings")
             self.import_data(self.DEFAULT_DB_NAME, None)
-
-# database functions
-
-    def get_table_names(self, cursor):
-        cursor.execute("SELECT name FROM sqlite_master WHERE type='table';")
-        return [row[0] for row in cursor.fetchall()]
-
-    def get_table_count(self, cursor, table_name):
-        cursor.execute(f"SELECT COUNT(*) FROM {table_name};")
-        return cursor.fetchone()[0]
 
 # main
 
