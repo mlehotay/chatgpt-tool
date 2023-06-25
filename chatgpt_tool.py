@@ -30,6 +30,9 @@ class ChatGPTTool:
         self.setup_help_command()
         self.setup_info_command()
         self.setup_test_command()
+        self.setup_export_command()
+        self.setup_conversation_command()
+        self.setup_inspect_command()
 
 # setup subcommands
 
@@ -426,6 +429,57 @@ class ChatGPTTool:
 
         conn.close()
 
+# inspect
+
+    def setup_inspect_command(self):
+        # Create the 'inspect' subcommand parser
+        inspect_parser = self.subparsers.add_parser("inspect", help="Inspect data files before importing")
+        inspect_parser.add_argument("-f", "--data-directory", type=str, default=self.DEFAULT_DATA_DIRECTORY, help="Data directory to inspect (JSON format)")
+
+    def inspect_data(self, data_directory=None):
+        data_directory = data_directory or self.DEFAULT_DATA_DIRECTORY
+
+        if not os.path.exists(data_directory):
+            print(f"Error: Data directory not found: {data_directory}")
+            return
+
+        data_files = self.get_data_files(data_directory)
+
+        if not data_files:
+            print("Error: No JSON data files found.")
+            return
+
+        for i, file_path in enumerate(data_files):
+            print(f"Inspecting data from: {file_path}")
+
+            if file_path.endswith(".zip"):
+                if not zipfile.is_zipfile(file_path):
+                    print(f"Error: Invalid zip file: {file_path}")
+                    continue
+
+                with zipfile.ZipFile(file_path, "r") as zip_file:
+                    json_files = [name for name in zip_file.namelist() if name.endswith(".json")]
+
+                if not json_files:
+                    print("Error: No JSON data files found in the zip file.")
+                    continue
+
+                for json_file in json_files:
+                    with zip_file.open(json_file) as file:
+                        json_data = json.load(file)
+                        self.inspect_json_data(json_data)
+            else:
+                with open(file_path) as file:
+                    json_data = json.load(file)
+                    self.inspect_json_data(json_data)
+
+    def inspect_json_data(self, json_data):
+        # Add your inspection logic here
+        # For example, you can print the schema, number of records, or any other relevant information
+        print(f"Schema: {list(json_data[0].keys())}")
+        print(f"Number of Records: {len(json_data)}")
+        # ...
+
 # utility functions
 
     def truncate_string(self, string, max_length):
@@ -477,6 +531,9 @@ class ChatGPTTool:
         elif args.subcommand == "test":
             print("Action: Run doctests")
             self.test(args.verbose)
+        elif args.subcommand == "inspect":
+            print("Action: Inspect data files")
+            self.inspect_data(args.data_directory)
         else:
             # No subcommand specified, try to import using default settings
             print("Action: Import using default settings")
