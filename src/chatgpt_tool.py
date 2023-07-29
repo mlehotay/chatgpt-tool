@@ -1,9 +1,7 @@
 import argparse
 import json
 import os
-import shutil
 import sqlite3
-import doctest
 import zipfile
 
 """
@@ -22,28 +20,20 @@ class ChatGPTTool:
 
     def __init__(self):
         self.parser = argparse.ArgumentParser(prog="chatgpt_tool", description="ChatGPT Tool")
-        self.parser.add_argument("-db", "--db-name", type=str, default=self.DEFAULT_DB_NAME, help="Database name")
-        self.parser.add_argument("-v", "--verbose", action="store_true", help="Verbose output")
-        self.parser.add_argument("subcommand", choices=["import", "show", "delete", "info", "help", "export", "conversation", "inspect"],
-                                 nargs="?", default="help", help="Subcommand")
-        self.parser.add_argument("path", nargs="?", default=self.DEFAULT_DATA_PATH, help="Filename or directory for import (default: data)")
+        self.parser.add_argument("subcommand", choices=["import", "show", "delete", "info", "export", "conversation", "inspect"], help="Subcommand")
+        self.parser.add_argument("path", nargs="?", default=self.DEFAULT_DATA_PATH, help="Filepath or directory for import (default: data)")
 
     # import
     ###########################################################################
 
-    def import_data(self, db_name, data_directory=None):
-        data_directory = data_directory or self.DEFAULT_DATA_PATH
-        if not os.path.exists(data_directory):
-            print(f"Error: Data directory not found: {data_directory}")
-            return
-
-        data_files = self.get_data_files(data_directory)
+    def import_data(self, data_path):
+        data_files = self.get_data_files(data_path)
 
         if not data_files:
             print("Error: No JSON data files found.")
             return
 
-        conn = sqlite3.connect(db_name)
+        conn = sqlite3.connect(self.DEFAULT_DB_NAME)
         cursor = conn.cursor()
 
         for i, file_path in enumerate(data_files):
@@ -58,15 +48,13 @@ class ChatGPTTool:
 
                 with zipfile.ZipFile(file_path, "r") as zip_file:
                     json_files = [name for name in zip_file.namelist() if name.endswith(".json")]
+                    json_data = []
 
-                if not json_files:
-                    print("Error: No JSON data files found in the zip file.")
-                    continue
+                    for json_file in json_files:
+                        with zip_file.open(json_file) as file:
+                            json_data.append(json.load(file))
 
-                for json_file in json_files:
-                    with zip_file.open(json_file) as file:
-                        json_data = json.load(file)
-                        self.import_json_data_to_sqlite(cursor, table_name, json_data)
+                    self.import_json_data_to_sqlite(cursor, table_name, json_data)
             else:
                 with open(file_path) as file:
                     json_data = json.load(file)
@@ -75,28 +63,15 @@ class ChatGPTTool:
         conn.commit()
         conn.close()
 
-    def get_data_files(self, data_directory=None):
-        data_directory = data_directory or self.DEFAULT_DATA_PATH
-
-        if not os.path.exists(data_directory):
-            print(f"Error: Data directory not found: {data_directory}")
+    def get_data_files(self, data_path):
+        if not os.path.exists(data_path):
+            print(f"Error: Data path not found: {data_path}")
             return []
 
-        if data_directory.endswith(".zip"):
-            if not zipfile.is_zipfile(data_directory):
-                print(f"Error: Invalid zip file: {data_directory}")
-                return []
+        if os.path.isfile(data_path):
+            return [data_path]
 
-            with zipfile.ZipFile(data_directory, "r") as zip_file:
-                json_files = [file for file in zip_file.namelist() if file.endswith(".json")]
-
-            if not json_files:
-                print("Error: No JSON data files found in the zip file.")
-                return []
-
-            return [os.path.join(data_directory, json_file) for json_file in json_files]
-
-        data_files = [os.path.join(data_directory, file) for file in os.listdir(data_directory) if file.endswith(".json")]
+        data_files = [os.path.join(data_path, file) for file in os.listdir(data_path) if file.endswith(".json")]
         return data_files
 
     def import_json_data_to_sqlite(self, cursor, table_name, json_data):
@@ -219,7 +194,7 @@ class ChatGPTTool:
     ###########################################################################
 
     def export_conversations(self, db_name, output_directory=None):
-        output_directory = output_directory or self.DEFAULT_DATA_DIRECTORY
+        output_directory = output_directory or self.DEFAULT_DATA_PATH
 
         if not os.path.exists(output_directory):
             os.makedirs(output_directory)
@@ -280,14 +255,14 @@ class ChatGPTTool:
     # inspect
     ###########################################################################
 
-    def inspect_data(self, data_directory=None):
-        data_directory = data_directory or self.DEFAULT_DATA_DIRECTORY
+    def inspect_data(self, data_path=None):
+        data_path = data_path or self.DEFAULT_DATA_PATH
 
-        if not os.path.exists(data_directory):
-            print(f"Error: Data directory not found: {data_directory}")
+        if not os.path.exists(data_path):
+            print(f"Error: Data directory not found: {data_path}")
             return
 
-        data_files = self.get_data_files(data_directory)
+        data_files = self.get_data_files(data_path)
 
         if not data_files:
             print("Error: No JSON data files found.")
@@ -355,31 +330,27 @@ class ChatGPTTool:
 
         if args.subcommand == "import":
             print("Action: Import")
-            self.import_data(args.db_name, args.data_directory)
+            self.import_data(args.path)
         elif args.subcommand == "show":
             print("Action: Display database tables")
-            self.print_tables(args.db_name)
+            self.print_tables()
         elif args.subcommand == "delete":
             print("Action: Delete database")
-            self.delete_database(args.db_name)
+            self.delete_database()
         elif args.subcommand == "info":
             print("Action: Display database information")
-            self.info(args.db_name)
-        elif args.subcommand == "help":
-            print("Action: Display help")
-            self.parser.print_help()
+            self.info()
         elif args.subcommand == "export":
             print("Action: Export conversations")
-            self.export_conversations(args.db_name, args.data_directory)
+            self.export_conversations(args.path)
         elif args.subcommand == "conversation":
             print("Action: Print conversation")
-            self.print_conversation(args.db_name, args.table_name, args.conversation_id)
+            self.print_conversation(args.path)
         elif args.subcommand == "inspect":
             print("Action: Inspect data files")
-            self.inspect_data(args.data_directory)
+            self.inspect_data(args.path)
         else:
             # No subcommand specified, display usage information
-            print("Action: None")
             self.parser.print_help()
 
 # main
