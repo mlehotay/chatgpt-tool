@@ -3,6 +3,7 @@ import json
 import os
 import sqlite3
 import zipfile
+import shutil
 
 """
 ChatGPT Tool
@@ -20,26 +21,27 @@ class ChatGPTTool:
 
     def __init__(self):
         self.parser = argparse.ArgumentParser(prog="chatgpt_tool", description="ChatGPT Tool")
-        self.parser.add_argument("subcommand", choices=["import", "show", "delete", "info", "export", "conversation", "inspect"], help="Subcommand")
+        self.parser.add_argument("subcommand", choices=["import", "show", "delete", "info", "export", "print", "inspect"], help="Subcommand")
         self.parser.add_argument("path", nargs="?", default=self.DEFAULT_DATA_PATH, help="Filepath or directory for import (default: data)")
+        self.parser.add_argument("-db", "--db-name", default=self.DEFAULT_DB_NAME, help="Name of the SQLite database (default: chatgpt.db)")
 
     # import
     ###########################################################################
 
-    def import_data(self, data_path):
+    def import_data(self, db_name, data_path):
         data_files = self.get_data_files(data_path)
 
         if not data_files:
             print("Error: No JSON data files found.")
             return
 
-        conn = sqlite3.connect(self.DEFAULT_DB_NAME)
+        conn = sqlite3.connect(db_name)
         cursor = conn.cursor()
 
-        for i, file_path in enumerate(data_files):
+        for file_path in data_files:
             print(f"Importing data from: {file_path}")
 
-            table_name = f"data_{i}"
+            table_name = self.get_table_name(file_path)
 
             if file_path.endswith(".zip"):
                 if not zipfile.is_zipfile(file_path):
@@ -73,6 +75,11 @@ class ChatGPTTool:
 
         data_files = [os.path.join(data_path, file) for file in os.listdir(data_path) if file.endswith(".json")]
         return data_files
+
+    def get_table_name(self, file_path):
+        base_filename = os.path.basename(file_path)
+        table_name = os.path.splitext(base_filename)[0]
+        return table_name
 
     def import_json_data_to_sqlite(self, cursor, table_name, json_data):
         # Check if the JSON data is empty
@@ -330,22 +337,22 @@ class ChatGPTTool:
 
         if args.subcommand == "import":
             print("Action: Import")
-            self.import_data(args.path)
+            self.import_data(args.db_name, args.path)
         elif args.subcommand == "show":
             print("Action: Display database tables")
-            self.print_tables()
+            self.print_tables(args.db_name)
         elif args.subcommand == "delete":
             print("Action: Delete database")
-            self.delete_database()
+            self.delete_database(args.db_name)
         elif args.subcommand == "info":
             print("Action: Display database information")
-            self.info()
+            self.info(args.db_name)
         elif args.subcommand == "export":
             print("Action: Export conversations")
-            self.export_conversations(args.path)
-        elif args.subcommand == "conversation":
+            self.export_conversations(args.db_name, args.path)
+        elif args.subcommand == "print":
             print("Action: Print conversation")
-            self.print_conversation(args.path)
+            self.print_conversation(args.db_name)
         elif args.subcommand == "inspect":
             print("Action: Inspect data files")
             self.inspect_data(args.path)
