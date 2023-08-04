@@ -4,6 +4,7 @@ import os
 import sqlite3
 import zipfile
 import shutil
+from gazpacho import Soup
 
 """
 ChatGPT Tool
@@ -21,46 +22,69 @@ class ChatGPTTool:
 
     def __init__(self):
         self.parser = argparse.ArgumentParser(prog="chatgpt_tool", description="ChatGPT Tool")
-        self.parser.add_argument("subcommand", choices=["import", "show", "delete", "info", "export", "print", "inspect"], help="Subcommand")
-        self.parser.add_argument("path", nargs="?", default=self.DEFAULT_DATA_PATH, help="Filepath or directory for import (default: data)")
-        self.parser.add_argument("-db", "--db-name", default=self.DEFAULT_DB_NAME, help="Name of the SQLite database (default: chatgpt.db)")
+
+        subparsers = self.parser.add_subparsers(title="subcommands", dest="subcommand")
+
+        # Subcommand: import
+        import_parser = subparsers.add_parser("import", help="Import JSON data into the SQLite database")
+        import_parser.add_argument("path", help="Filepath or directory for import")
+        import_parser.add_argument("-db", "--db-name", dest="db_name", default=self.DEFAULT_DB_NAME, help="Name of the SQLite database (default: chatgpt.db)")
+
+        # Subcommand: show
+        show_parser = subparsers.add_parser("show", help="Display database tables")
+        show_parser.add_argument("-db", "--db-name", dest="db_name", default=self.DEFAULT_DB_NAME, help="Name of the SQLite database (default: chatgpt.db)")
+
+        # Subcommand: info
+        info_parser = subparsers.add_parser("info", help="Display database information")
+        info_parser.add_argument("-db", "--db-name", dest="db_name", default=self.DEFAULT_DB_NAME, help="Name of the SQLite database (default: chatgpt.db)")
+
+        # Subcommand: export
+        export_parser = subparsers.add_parser("export", help="Export conversations from the SQLite database")
+        export_parser.add_argument("path", help="Output directory for export")
+        export_parser.add_argument("-db", "--db-name", dest="db_name", default=self.DEFAULT_DB_NAME, help="Name of the SQLite database (default: chatgpt.db)")
+
+        # Subcommand: print
+        print_parser = subparsers.add_parser("print", help="Print conversation")
+        print_parser.add_argument("id_prefix", help="Conversation ID prefix to find and print.")
+        print_parser.add_argument("-db", "--db-name", dest="db_name", default=self.DEFAULT_DB_NAME, help="Name of the SQLite database (default: chatgpt.db)")
+
+        # Subcommand: inspect
+        inspect_parser = subparsers.add_parser("inspect", help="Inspect data files")
+        inspect_parser.add_argument("path", nargs="?", default=self.DEFAULT_DATA_PATH, help="Data directory for inspection")
 
     # import
     ###########################################################################
 
     def import_data(self, db_name, data_path):
-        data_files = self.get_data_files(data_path)
+        # Check if the path is a file
+        if os.path.isfile(data_path):
+            self.import_single_file(db_name, data_path)
+        # Check if the path is a directory
+        elif os.path.isdir(data_path):
+            data_files = self.get_data_files(data_path)
+            if not data_files:
+                print("Error: No JSON or HTML data files found.")
+                return
 
-        if not data_files:
-            print("Error: No JSON data files found.")
-            return
+            conn = sqlite3.connect(db_name)
+            cursor = conn.cursor()
 
-        conn = sqlite3.connect(db_name)
-        cursor = conn.cursor()
-
-        for file_path in data_files:
-            print(f"Importing data from: {file_path}")
-
-            table_name = self.get_table_name(file_path)
-
-            if file_path.endswith(".zip"):
-                if not zipfile.is_zipfile(file_path):
-                    print(f"Error: Invalid zip file: {file_path}")
-                    continue
-
-                with zipfile.ZipFile(file_path, "r") as zip_file:
-                    json_files = [name for name in zip_file.namelist() if name.endswith(".json")]
-                    json_data = []
-
-                    for json_file in json_files:
-                        with zip_file.open(json_file) as file:
-                            json_data.append(json.load(file))
-
-                    self.import_json_data_to_sqlite(cursor, table_name, json_data)
-            else:
-                with open(file_path) as file:
-                    json_data = json.load(file)
-                    self.import_json_data_to_sqlite(cursor, table_name, json_data)
+            for file_path in data_files:
+                print(f"Importing data from: {file_path}")
+                if file_path.endswith(".json"):
+                    with open(file_path) as file:
+                        json_data = json.load(file)
+                        self.import_json_data_to_sqlite(cursor, self.get_table_name(file_path), json_data)
+                elif file_path.endswith(".html"):
+                    with open(file_path) as file:
+                        html_content = file.read()
+                        json_data = self.extract_json_from_html(html_content)
+                        if json_data:
+                            self.import_json_data_to_sqlite(cursor, self.get_table_name(file_path), json_data)
+                        else:
+                            print(f"Warning: No JSON data found in the HTML file: {file_path}")
+                else:
+                    print(f"Warning: Unexpected file format: {file_path}")
 
         conn.commit()
         conn.close()
@@ -70,16 +94,79 @@ class ChatGPTTool:
             print(f"Error: Data path not found: {data_path}")
             return []
 
-        if os.path.isfile(data_path):
-            return [data_path]
+        data_files = []
+        if os.path.isfile(data_path) and data_path.endswith(".json"):
+            data_files.append(data_path)
+        elif os.path.isdir(data_path):
+            for root, _, filenames in os.walk(data_path):
+                for filename in filenames:
+                    file_path = os.path.join(root, filename)
+                    if file_path.endswith(".json"):
+                        data_files.append(file_path)
+                    elif file_path.endswith(".zip"):
+                        with zipfile.ZipFile(file_path, "r") as zip_file:
+                            for name in zip_file.namelist():
+                                if name.endswith(".json"):
+                                    json_file_path = zip_file.extract(name)
+                                    data_files.append(json_file_path)
+                                else:
+                                    print(f"Warning: Unexpected file in zip archive: {name}")
 
-        data_files = [os.path.join(data_path, file) for file in os.listdir(data_path) if file.endswith(".json")]
         return data_files
+
+    def import_single_file(self, db_name, file_path):
+        conn = sqlite3.connect(db_name)
+        cursor = conn.cursor()
+
+        print(f"Importing data from: {file_path}")
+
+        if file_path.endswith(".json"):
+            with open(file_path) as file:
+                json_data = json.load(file)
+                self.import_json_data_to_sqlite(cursor, self.get_table_name(file_path), json_data)
+        elif file_path.endswith(".html"):
+            with open(file_path) as file:
+                html_content = file.read()
+                json_data = self.extract_json_from_html(html_content)
+                if json_data:
+                    self.import_json_data_to_sqlite(cursor, self.get_table_name(file_path), json_data)
+                else:
+                    print(f"Warning: No JSON data found in the HTML file: {file_path}")
+        else:
+            print(f"Warning: Unexpected file format: {file_path}")
+
+        conn.commit()
+        conn.close()
 
     def get_table_name(self, file_path):
         base_filename = os.path.basename(file_path)
         table_name = os.path.splitext(base_filename)[0]
         return table_name
+
+    def extract_json_from_html(self, html_content):
+        # Parse the HTML content using Gazpacho
+        soup = Soup(html_content)
+
+        # Find the <script> tags in the HTML
+        script_tags = soup.find("script")
+
+        # Search for JSON data within the <script> tags
+        json_data = []
+        for script_tag in script_tags:
+            if "json" in script_tag:
+                # Extract JSON data from the <script> tag
+                json_start = script_tag.index("{")
+                json_end = script_tag.rindex("}") + 1
+                json_string = script_tag[json_start:json_end]
+
+                # Convert JSON string to Python object (dict or list)
+                try:
+                    data = json.loads(json_string)
+                    json_data.append(data)
+                except json.JSONDecodeError:
+                    print("Warning: JSON data in <script> tag is not valid JSON.")
+
+        return json_data
 
     def import_json_data_to_sqlite(self, cursor, table_name, json_data):
         # Check if the JSON data is empty
@@ -158,6 +245,15 @@ class ChatGPTTool:
 
         conn.close()
 
+    def truncate_string(self, string, max_length):
+        if len(string) <= max_length:
+            return string
+        return string[:max_length-3] + "..."
+
+    def get_truncation_length(self):
+        terminal_size = shutil.get_terminal_size(fallback=(80, 24))
+        return terminal_size.columns - 3  # Subtract 3 to account for ellipsis
+
     # delete
     ###########################################################################
 
@@ -196,6 +292,15 @@ class ChatGPTTool:
 
         # Close the database connection
         conn.close()
+
+    def get_table_names(self, cursor):
+        cursor.execute("SELECT name FROM sqlite_master WHERE type='table';")
+        return [row[0] for row in cursor.fetchall()]
+
+    def get_table_count(self, cursor, table_name):
+        cursor.execute(f"SELECT COUNT(*) FROM {table_name};")
+        return cursor.fetchone()[0]
+
 
     # export
     ###########################################################################
@@ -300,34 +405,9 @@ class ChatGPTTool:
                     self.inspect_json_data(json_data)
 
     def inspect_json_data(self, json_data):
-        # Add your inspection logic here
-        # For example, you can print the schema, number of records, or any other relevant information
         print(f"Schema: {list(json_data[0].keys())}")
         print(f"Number of Records: {len(json_data)}")
         # ...
-
-    # utility functions
-    ###########################################################################
-
-    def truncate_string(self, string, max_length):
-        if len(string) <= max_length:
-            return string
-        return string[:max_length-3] + "..."
-
-    def get_truncation_length(self):
-        terminal_size = shutil.get_terminal_size(fallback=(80, 24))
-        return terminal_size.columns - 3  # Subtract 3 to account for ellipsis
-
-    # database functions
-    ###########################################################################
-
-    def get_table_names(self, cursor):
-        cursor.execute("SELECT name FROM sqlite_master WHERE type='table';")
-        return [row[0] for row in cursor.fetchall()]
-
-    def get_table_count(self, cursor, table_name):
-        cursor.execute(f"SELECT COUNT(*) FROM {table_name};")
-        return cursor.fetchone()[0]
 
     # run
     ###########################################################################
@@ -341,9 +421,6 @@ class ChatGPTTool:
         elif args.subcommand == "show":
             print("Action: Display database tables")
             self.print_tables(args.db_name)
-        elif args.subcommand == "delete":
-            print("Action: Delete database")
-            self.delete_database(args.db_name)
         elif args.subcommand == "info":
             print("Action: Display database information")
             self.info(args.db_name)
@@ -352,12 +429,14 @@ class ChatGPTTool:
             self.export_conversations(args.db_name, args.path)
         elif args.subcommand == "print":
             print("Action: Print conversation")
-            self.print_conversation(args.db_name)
+            if args.id_prefix:
+                self.print_conversation(args.db_name, args.id_prefix)
+            else:
+                print("Error: 'print' subcommand requires the 'id_prefix' argument.")
         elif args.subcommand == "inspect":
             print("Action: Inspect data files")
             self.inspect_data(args.path)
         else:
-            # No subcommand specified, display usage information
             self.parser.print_help()
 
 # main
