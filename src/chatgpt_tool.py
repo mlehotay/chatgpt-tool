@@ -4,6 +4,9 @@ import os
 import sqlite3
 import zipfile
 import shutil
+import tempfile
+import re
+
 from gazpacho import Soup
 
 """
@@ -56,6 +59,9 @@ class ChatGPTTool:
     ###########################################################################
 
     def import_data(self, db_name, data_path):
+        conn = sqlite3.connect(db_name)
+        cursor = conn.cursor()
+
         # Check if the path is a file
         if os.path.isfile(data_path):
             self.import_single_file(db_name, data_path)
@@ -65,9 +71,6 @@ class ChatGPTTool:
             if not data_files:
                 print("Error: No JSON or HTML data files found.")
                 return
-
-            conn = sqlite3.connect(db_name)
-            cursor = conn.cursor()
 
             for file_path in data_files:
                 print(f"Importing data from: {file_path}")
@@ -95,22 +98,23 @@ class ChatGPTTool:
             return []
 
         data_files = []
-        if os.path.isfile(data_path) and data_path.endswith(".json"):
+        if os.path.isfile(data_path) and (data_path.endswith(".json") or data_path.endswith(".html")):
             data_files.append(data_path)
         elif os.path.isdir(data_path):
             for root, _, filenames in os.walk(data_path):
                 for filename in filenames:
                     file_path = os.path.join(root, filename)
-                    if file_path.endswith(".json"):
+                    if file_path.endswith(".json") or file_path.endswith(".html"):
                         data_files.append(file_path)
                     elif file_path.endswith(".zip"):
-                        with zipfile.ZipFile(file_path, "r") as zip_file:
-                            for name in zip_file.namelist():
-                                if name.endswith(".json"):
-                                    json_file_path = zip_file.extract(name)
-                                    data_files.append(json_file_path)
-                                else:
-                                    print(f"Warning: Unexpected file in zip archive: {name}")
+                        with tempfile.TemporaryDirectory() as temp_dir:  # Use a temporary directory
+                            with zipfile.ZipFile(file_path, "r") as zip_file:
+                                for name in zip_file.namelist():
+                                    if name.endswith(".json") or name.endswith(".html"):
+                                        extracted_file_path = zip_file.extract(name, path=temp_dir)
+                                        data_files.append(extracted_file_path)
+                                    else:
+                                        print(f"Warning: Unexpected file in zip archive: {name}")
 
         return data_files
 
@@ -141,6 +145,7 @@ class ChatGPTTool:
     def get_table_name(self, file_path):
         base_filename = os.path.basename(file_path)
         table_name = os.path.splitext(base_filename)[0]
+        table_name = re.sub(r'\W+', '_', table_name)  # Replace non-word characters with underscores
         return table_name
 
     def extract_json_from_html(self, html_content):
@@ -148,25 +153,31 @@ class ChatGPTTool:
         soup = Soup(html_content)
 
         # Find the <script> tags in the HTML
-        script_tags = soup.find("script")
+        script_tags = soup.find('script', mode='all', partial=False)
 
-        # Search for JSON data within the <script> tags
-        json_data = []
+        # Search for the <script> tag containing the jsonData variable assignment
+        json_data = None
         for script_tag in script_tags:
-            if "json" in script_tag:
-                # Extract JSON data from the <script> tag
-                json_start = script_tag.index("{")
-                json_end = script_tag.rindex("}") + 1
-                json_string = script_tag[json_start:json_end]
-
-                # Convert JSON string to Python object (dict or list)
+            if 'jsonData =' in script_tag.text:
+                lines = script_tag.text.split('\n')
+                line_with_json = next(line for line in lines if 'jsonData =' in line)
                 try:
-                    data = json.loads(json_string)
-                    json_data.append(data)
-                except json.JSONDecodeError:
-                    print("Warning: JSON data in <script> tag is not valid JSON.")
+                    json_start = line_with_json.index("[")
+                    json_end = line_with_json.rindex("]") + 1
+                    json_string = line_with_json[json_start:json_end]
 
-        return json_data
+                    # Convert JSON string to Python object (list of dicts)
+                    json_data = json.loads(json_string)
+                    break
+                except (json.JSONDecodeError, ValueError, IndexError):
+                    print("Warning: Unable to extract JSON objects from jsonData variable.")
+                    return None
+
+        if json_data is not None:
+            return json_data
+
+        print("Warning: No <script> tag containing jsonData variable found.")
+        return []
 
     def import_json_data_to_sqlite(self, cursor, table_name, json_data):
         # Check if the JSON data is empty
@@ -253,16 +264,6 @@ class ChatGPTTool:
     def get_truncation_length(self):
         terminal_size = shutil.get_terminal_size(fallback=(80, 24))
         return terminal_size.columns - 3  # Subtract 3 to account for ellipsis
-
-    # delete
-    ###########################################################################
-
-    def delete_database(self, db_name):
-        try:
-            os.remove(db_name)
-            print(f"Deleted database: {db_name}")
-        except FileNotFoundError:
-            print(f"Database not found: {db_name}")
 
     # info
     ###########################################################################
