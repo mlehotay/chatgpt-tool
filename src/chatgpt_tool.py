@@ -7,7 +7,6 @@ import shutil
 import tempfile
 import string
 
-
 from gazpacho import Soup
 
 """
@@ -16,6 +15,11 @@ ChatGPT Tool
 ChatGPT Tool is a command-line utility for importing ChatGPT conversations from JSON and managing them in a SQLite database.
 
 """
+
+html_to_json_mapping = {
+    "chat": "conversations",
+    # Add more mappings if needed
+}
 
 class ChatGPTTool:
     DEFAULT_DB_NAME = "chatgpt.db"
@@ -74,34 +78,39 @@ class ChatGPTTool:
                 return
 
             for file_path in data_files:
-                print(f"Importing data from: {file_path}")
                 self.import_single_file(cursor, file_path)
 
         conn.commit()
         conn.close()
 
     def import_single_file(self, cursor, file_path):
+        print(f"Importing data from: {file_path}")
         if file_path.endswith(".json"):
             with open(file_path) as file:
                 json_data = json.load(file)
-                self.import_json_data_to_sqlite(cursor, self.get_table_name(file_path), json_data)
+                table_name = self.get_table_name(file_path)
+                self.import_json_data_to_sqlite(cursor, table_name, json_data)
         elif file_path.endswith(".html"):
             with open(file_path) as file:
+                html_basename = self.get_table_name(file_path)
                 html_content = file.read()
                 json_data = self.extract_json_from_html(html_content)
+                if html_basename in html_to_json_mapping:
+                    table_name = html_to_json_mapping[html_basename]
+                else:
+                    print(f"Warning: No JSON mapping found for HTML file: {file_path}")
+                    table_name = html_basename
+                # print(f"html_basename: {html_basename}, table_name: {table_name}")
                 if json_data:
-                    self.import_json_data_to_sqlite(cursor, self.get_table_name(file_path), json_data)
+                    self.import_json_data_to_sqlite(cursor, table_name, json_data)
                 else:
                     print(f"Warning: No JSON data found in the HTML file: {file_path}")
         elif file_path.endswith(".zip"):
             with tempfile.TemporaryDirectory() as temp_dir:  # Use a temporary directory
                 with zipfile.ZipFile(file_path, "r") as zip_file:
                     for name in zip_file.namelist():
-                        if name.endswith(".json") or name.endswith(".html"):
-                            extracted_file_path = zip_file.extract(name, path=temp_dir)
-                            self.import_single_file(cursor, extracted_file_path)
-                        else:
-                            print(f"Warning: Unexpected file in zip archive: {name}")
+                        extracted_file_path = zip_file.extract(name, path=temp_dir)
+                        self.import_single_file(cursor, extracted_file_path)
         else:
             print(f"Warning: Unexpected file format: {file_path}")
 
@@ -119,9 +128,6 @@ class ChatGPTTool:
                     file_path = os.path.join(root, filename)
                     if file_path.endswith(".json") or file_path.endswith(".html") or file_path.endswith(".zip"):
                         data_files.append(file_path)
-                    else:
-                        print(f"Warning: Unexpected file format: {file_path}")
-
         return data_files
 
     def get_table_name(self, file_path):
@@ -191,6 +197,7 @@ class ChatGPTTool:
                 print(f"Skipping import for table: {table_name} (no 'id' field found)")
                 return
             column_names = json_data.keys()
+        # print(f"table: {table_name}; columns: {column_names}")
 
         # Create a table for the current data
         create_table_query = f"CREATE TABLE IF NOT EXISTS {table_name} ({id_field_name} TEXT PRIMARY KEY,"
