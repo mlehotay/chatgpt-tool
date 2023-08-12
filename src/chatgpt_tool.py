@@ -5,7 +5,8 @@ import sqlite3
 import zipfile
 import shutil
 import tempfile
-import re
+import string
+
 
 from gazpacho import Soup
 
@@ -64,66 +65,22 @@ class ChatGPTTool:
 
         # Check if the path is a file
         if os.path.isfile(data_path):
-            self.import_single_file(db_name, data_path)
+            self.import_single_file(cursor, data_path)
         # Check if the path is a directory
         elif os.path.isdir(data_path):
             data_files = self.get_data_files(data_path)
             if not data_files:
-                print("Error: No JSON or HTML data files found.")
+                print("Error: No JSON, HTML, or ZIP data files found.")
                 return
 
             for file_path in data_files:
                 print(f"Importing data from: {file_path}")
-                if file_path.endswith(".json"):
-                    with open(file_path) as file:
-                        json_data = json.load(file)
-                        self.import_json_data_to_sqlite(cursor, self.get_table_name(file_path), json_data)
-                elif file_path.endswith(".html"):
-                    with open(file_path) as file:
-                        html_content = file.read()
-                        json_data = self.extract_json_from_html(html_content)
-                        if json_data:
-                            self.import_json_data_to_sqlite(cursor, self.get_table_name(file_path), json_data)
-                        else:
-                            print(f"Warning: No JSON data found in the HTML file: {file_path}")
-                else:
-                    print(f"Warning: Unexpected file format: {file_path}")
+                self.import_single_file(cursor, file_path)
 
         conn.commit()
         conn.close()
 
-    def get_data_files(self, data_path):
-        if not os.path.exists(data_path):
-            print(f"Error: Data path not found: {data_path}")
-            return []
-
-        data_files = []
-        if os.path.isfile(data_path) and (data_path.endswith(".json") or data_path.endswith(".html")):
-            data_files.append(data_path)
-        elif os.path.isdir(data_path):
-            for root, _, filenames in os.walk(data_path):
-                for filename in filenames:
-                    file_path = os.path.join(root, filename)
-                    if file_path.endswith(".json") or file_path.endswith(".html"):
-                        data_files.append(file_path)
-                    elif file_path.endswith(".zip"):
-                        with tempfile.TemporaryDirectory() as temp_dir:  # Use a temporary directory
-                            with zipfile.ZipFile(file_path, "r") as zip_file:
-                                for name in zip_file.namelist():
-                                    if name.endswith(".json") or name.endswith(".html"):
-                                        extracted_file_path = zip_file.extract(name, path=temp_dir)
-                                        data_files.append(extracted_file_path)
-                                    else:
-                                        print(f"Warning: Unexpected file in zip archive: {name}")
-
-        return data_files
-
-    def import_single_file(self, db_name, file_path):
-        conn = sqlite3.connect(db_name)
-        cursor = conn.cursor()
-
-        print(f"Importing data from: {file_path}")
-
+    def import_single_file(self, cursor, file_path):
         if file_path.endswith(".json"):
             with open(file_path) as file:
                 json_data = json.load(file)
@@ -136,16 +93,47 @@ class ChatGPTTool:
                     self.import_json_data_to_sqlite(cursor, self.get_table_name(file_path), json_data)
                 else:
                     print(f"Warning: No JSON data found in the HTML file: {file_path}")
+        elif file_path.endswith(".zip"):
+            with tempfile.TemporaryDirectory() as temp_dir:  # Use a temporary directory
+                with zipfile.ZipFile(file_path, "r") as zip_file:
+                    for name in zip_file.namelist():
+                        if name.endswith(".json") or name.endswith(".html"):
+                            extracted_file_path = zip_file.extract(name, path=temp_dir)
+                            self.import_single_file(cursor, extracted_file_path)
+                        else:
+                            print(f"Warning: Unexpected file in zip archive: {name}")
         else:
             print(f"Warning: Unexpected file format: {file_path}")
 
-        conn.commit()
-        conn.close()
+    def get_data_files(self, data_path):
+        if not os.path.exists(data_path):
+            print(f"Error: Data path not found: {data_path}")
+            return []
+
+        data_files = []
+        if os.path.isfile(data_path) and (data_path.endswith(".json") or data_path.endswith(".html") or data_path.endswith(".zip")):
+            data_files.append(data_path)
+        elif os.path.isdir(data_path):
+            for root, _, filenames in os.walk(data_path):
+                for filename in filenames:
+                    file_path = os.path.join(root, filename)
+                    if file_path.endswith(".json") or file_path.endswith(".html") or file_path.endswith(".zip"):
+                        data_files.append(file_path)
+                    else:
+                        print(f"Warning: Unexpected file format: {file_path}")
+
+        return data_files
 
     def get_table_name(self, file_path):
         base_filename = os.path.basename(file_path)
         table_name = os.path.splitext(base_filename)[0]
-        table_name = re.sub(r'\W+', '_', table_name)  # Replace non-word characters with underscores
+
+        # Create a set of valid characters for the table name
+        valid_chars = set(string.ascii_letters + string.digits + "_")
+
+        # Generate the table name using only valid characters
+        table_name = ''.join(c if c in valid_chars else "_" for c in table_name)
+
         return table_name
 
     def extract_json_from_html(self, html_content):
