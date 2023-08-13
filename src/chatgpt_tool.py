@@ -24,6 +24,7 @@ html_to_json_mapping = {
 class ChatGPTTool:
     DEFAULT_DB_NAME = "chatgpt.db"
     DEFAULT_DATA_PATH = "data"
+    CHAT_TABLE = "conversations"
 
     # init
     ###########################################################################
@@ -67,23 +68,27 @@ class ChatGPTTool:
         conn = sqlite3.connect(db_name)
         cursor = conn.cursor()
 
-        # Check if the path is a file
-        if os.path.isfile(data_path):
-            self.import_single_file(cursor, data_path)
-        # Check if the path is a directory
-        elif os.path.isdir(data_path):
-            data_files = self.get_data_files(data_path)
-            if not data_files:
-                print("Error: No JSON, HTML, or ZIP data files found.")
-                return
-
-            for file_path in data_files:
-                self.import_single_file(cursor, file_path)
+        self.traverse_files(data_path, self.import_file, cursor)
 
         conn.commit()
         conn.close()
 
-    def import_single_file(self, cursor, file_path):
+    def traverse_files(self, path, process_function, *args):
+        if os.path.isdir(path):
+            for root, _, filenames in os.walk(path):
+                for filename in filenames:
+                    file_path = os.path.join(root, filename)
+                    self.traverse_files(file_path, process_function, *args)
+        elif path.endswith(".zip"):
+            with tempfile.TemporaryDirectory() as temp_dir:
+                with zipfile.ZipFile(path, "r") as zip_file:
+                    for name in zip_file.namelist():
+                        extracted_file_path = zip_file.extract(name, path=temp_dir)
+                        self.traverse_files(extracted_file_path, process_function, *args)
+        else:
+            process_function(*args, path)
+
+    def import_file(self, cursor, file_path):
         print(f"Importing data from: {file_path}")
         if file_path.endswith(".json"):
             with open(file_path) as file:
@@ -95,40 +100,13 @@ class ChatGPTTool:
                 html_basename = self.get_table_name(file_path)
                 html_content = file.read()
                 json_data = self.extract_json_from_html(html_content)
-                if html_basename in html_to_json_mapping:
-                    table_name = html_to_json_mapping[html_basename]
-                else:
-                    print(f"Warning: No JSON mapping found for HTML file: {file_path}")
-                    table_name = html_basename
-                # print(f"html_basename: {html_basename}, table_name: {table_name}")
                 if json_data:
+                    table_name = html_to_json_mapping.get(html_basename, html_basename)
                     self.import_json_data_to_sqlite(cursor, table_name, json_data)
                 else:
                     print(f"Warning: No JSON data found in the HTML file: {file_path}")
-        elif file_path.endswith(".zip"):
-            with tempfile.TemporaryDirectory() as temp_dir:  # Use a temporary directory
-                with zipfile.ZipFile(file_path, "r") as zip_file:
-                    for name in zip_file.namelist():
-                        extracted_file_path = zip_file.extract(name, path=temp_dir)
-                        self.import_single_file(cursor, extracted_file_path)
         else:
             print(f"Warning: Unexpected file format: {file_path}")
-
-    def get_data_files(self, data_path):
-        if not os.path.exists(data_path):
-            print(f"Error: Data path not found: {data_path}")
-            return []
-
-        data_files = []
-        if os.path.isfile(data_path) and (data_path.endswith(".json") or data_path.endswith(".html") or data_path.endswith(".zip")):
-            data_files.append(data_path)
-        elif os.path.isdir(data_path):
-            for root, _, filenames in os.walk(data_path):
-                for filename in filenames:
-                    file_path = os.path.join(root, filename)
-                    if file_path.endswith(".json") or file_path.endswith(".html") or file_path.endswith(".zip"):
-                        data_files.append(file_path)
-        return data_files
 
     def get_table_name(self, file_path):
         base_filename = os.path.basename(file_path)
@@ -354,14 +332,14 @@ class ChatGPTTool:
 
         return json_data
 
-    # conversation
+    # print
     ###########################################################################
 
-    def print_conversation(self, db_name, table_name, conversation_id):
+    def print_conversation(self, db_name, conversation_id):
         conn = sqlite3.connect(db_name)
         cursor = conn.cursor()
 
-        cursor.execute(f"SELECT * FROM {table_name} WHERE id = ?", (conversation_id,))
+        cursor.execute(f"SELECT * FROM {self.CHAT_TABLE} WHERE id = ?", (conversation_id,))
         row = cursor.fetchone()
 
         if row:
@@ -386,40 +364,38 @@ class ChatGPTTool:
             print(f"Error: Data directory not found: {data_path}")
             return
 
-        data_files = self.get_data_files(data_path)
+        self.traverse_files(data_path, self.inspect_file)
 
-        if not data_files:
-            print("Error: No JSON data files found.")
-            return
-
-        for i, file_path in enumerate(data_files):
-            print(f"Inspecting data from: {file_path}")
-
-            if file_path.endswith(".zip"):
-                if not zipfile.is_zipfile(file_path):
-                    print(f"Error: Invalid zip file: {file_path}")
-                    continue
-
-                with zipfile.ZipFile(file_path, "r") as zip_file:
-                    json_files = [name for name in zip_file.namelist() if name.endswith(".json")]
-
-                if not json_files:
-                    print("Error: No JSON data files found in the zip file.")
-                    continue
-
-                for json_file in json_files:
-                    with zip_file.open(json_file) as file:
-                        json_data = json.load(file)
-                        self.inspect_json_data(json_data)
-            else:
-                with open(file_path) as file:
-                    json_data = json.load(file)
+    def inspect_file(self, file_path):
+        print(f"Inspecting data from: {file_path}")
+        if file_path.endswith(".json"):
+            with open(file_path) as file:
+                json_data = json.load(file)
+                self.inspect_json_data(json_data)
+        elif file_path.endswith(".html"):
+            with open(file_path) as file:
+                html_content = file.read()
+                json_data = self.extract_json_from_html(html_content)
+                if json_data:
                     self.inspect_json_data(json_data)
+                else:
+                    print("Warning: No JSON data found in the HTML file.")
+        else:
+            print("Warning: Unexpected file format.")
 
     def inspect_json_data(self, json_data):
-        print(f"Schema: {list(json_data[0].keys())}")
-        print(f"Number of Records: {len(json_data)}")
-        # ...
+        if not json_data:
+            print("Warning: JSON data is empty.")
+            return
+
+        if not isinstance(json_data, list) or not all(isinstance(item, dict) for item in json_data):
+            print("Warning: Invalid JSON data format. Expected a list of dictionaries.")
+            return
+
+        if json_data:
+            print(f"Schema: {list(json_data[0].keys())}")
+            print(f"Number of Records: {len(json_data)}")
+            # ... (other inspection logic)
 
     # run
     ###########################################################################
