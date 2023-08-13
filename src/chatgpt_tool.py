@@ -297,6 +297,22 @@ class ChatGPTTool:
         cursor.execute(f"SELECT COUNT(*) FROM {table_name};")
         return cursor.fetchone()[0]
 
+    def query_table(self, table_name, condition_field, condition_value):
+        conn = sqlite3.connect(self.DEFAULT_DB_NAME)
+        cursor = conn.cursor()
+
+        query = f"SELECT * FROM {table_name} WHERE {condition_field} = ?"
+        cursor.execute(query, (condition_value,))
+        row = cursor.fetchone()
+
+        if row:
+            column_names = [column[0] for column in cursor.description]
+            result = dict(zip(column_names, row))
+        else:
+            result = None
+
+        conn.close()
+        return result
 
     # export
     ###########################################################################
