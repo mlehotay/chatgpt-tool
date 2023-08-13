@@ -16,15 +16,16 @@ ChatGPT Tool is a command-line utility for importing ChatGPT conversations from 
 
 """
 
-html_to_json_mapping = {
-    "chat": "conversations",
-    # Add more mappings if needed
-}
-
 class ChatGPTTool:
     DEFAULT_DB_NAME = "chatgpt.db"
     DEFAULT_DATA_PATH = "data"
+    DEFAULT_EXPORT_PATH = "export"
     CHAT_TABLE = "conversations"
+
+    HTML_TO_JSON_MAPPING = {
+        "chat": CHAT_TABLE,
+        # Add more mappings if needed
+    }
 
     # init
     ###########################################################################
@@ -68,7 +69,7 @@ class ChatGPTTool:
         conn = sqlite3.connect(db_name)
         cursor = conn.cursor()
 
-        self.traverse_files(data_path, self.import_file, cursor)
+        self.traverse_files(data_path, self.import_json_data_to_sqlite, cursor)
 
         conn.commit()
         conn.close()
@@ -86,27 +87,31 @@ class ChatGPTTool:
                         extracted_file_path = zip_file.extract(name, path=temp_dir)
                         self.traverse_files(extracted_file_path, process_function, *args)
         else:
-            process_function(*args, path)
+            _, file_extension = os.path.splitext(path)
+            if file_extension.lower() in (".json", ".html"):
+                self.process_file(path, process_function, *args)
 
-    def import_file(self, cursor, file_path):
-        print(f"Importing data from: {file_path}")
-        if file_path.endswith(".json"):
-            with open(file_path) as file:
+    def process_file(self, path, process_function, *args):
+        _, file_extension = os.path.splitext(path)
+        table_name = None
+
+        if file_extension.lower() == ".json":
+            with open(path) as file:
                 json_data = json.load(file)
-                table_name = self.get_table_name(file_path)
-                self.import_json_data_to_sqlite(cursor, table_name, json_data)
-        elif file_path.endswith(".html"):
-            with open(file_path) as file:
-                html_basename = self.get_table_name(file_path)
+                table_name = self.get_table_name(path)
+                process_function(*args, json_data, table_name)
+        elif file_extension.lower() == ".html":
+            with open(path) as file:
                 html_content = file.read()
                 json_data = self.extract_json_from_html(html_content)
                 if json_data:
-                    table_name = html_to_json_mapping.get(html_basename, html_basename)
-                    self.import_json_data_to_sqlite(cursor, table_name, json_data)
+                    html_basename = self.get_table_name(path)
+                    table_name = self.HTML_TO_JSON_MAPPING.get(html_basename, html_basename)
+                    process_function(*args, json_data, table_name)
                 else:
-                    print(f"Warning: No JSON data found in the HTML file: {file_path}")
+                    print("Warning: No JSON data found in the HTML file.")
         else:
-            print(f"Warning: Unexpected file format: {file_path}")
+            print("Warning: Unexpected file format.")
 
     def get_table_name(self, file_path):
         base_filename = os.path.basename(file_path)
@@ -151,33 +156,40 @@ class ChatGPTTool:
         print("Warning: No <script> tag containing jsonData variable found.")
         return []
 
-    def import_json_data_to_sqlite(self, cursor, table_name, json_data):
+    def import_json_data_to_sqlite(self, cursor, json_data, table_name):
         # Check if the JSON data is empty
         if not json_data:
             print(f"Skipping import for table: {table_name} (empty JSON data)")
             return
 
-        # Check if the JSON data is a list or a single object
-        if isinstance(json_data, list):
-            if not json_data:
-                print(f"Skipping import for table: {table_name} (empty JSON data)")
-                return
-
-            first_object = json_data[0]
-            id_field_name = next((key for key in first_object.keys() if key.lower() == "id"), None)
-            if not id_field_name:
-                print(f"Skipping import for table: {table_name} (no 'id' field found)")
-                return
-            column_names = first_object.keys()
-        else:
-            id_field_name = next((key for key in json_data.keys() if key.lower() == "id"), None)
-            if not id_field_name:
-                print(f"Skipping import for table: {table_name} (no 'id' field found)")
-                return
-            column_names = json_data.keys()
-        # print(f"table: {table_name}; columns: {column_names}")
+        id_field_name, column_names = self.get_id_and_column_names(json_data)
+        if not id_field_name:
+            print(f"Skipping import for table: {table_name} (no 'id' field found)")
+            return
 
         # Create a table for the current data
+        self.create_table(cursor, table_name, id_field_name, column_names)
+
+        # Insert data into the table
+        if isinstance(json_data, list):
+            self.insert_data_list(cursor, table_name, json_data)
+        else:
+            self.insert_data_single(cursor, table_name, json_data)
+
+    def get_id_and_column_names(self, json_data):
+        if isinstance(json_data, list):
+            first_object = json_data[0]
+        else:
+            first_object = json_data
+
+        id_field_name = next((key for key in first_object.keys() if key.lower() == "id"), None)
+        if not id_field_name:
+            return None, None
+
+        column_names = first_object.keys()
+        return id_field_name, column_names
+
+    def create_table(self, cursor, table_name, id_field_name, column_names):
         create_table_query = f"CREATE TABLE IF NOT EXISTS {table_name} ({id_field_name} TEXT PRIMARY KEY,"
         for column_name in column_names:
             if column_name.lower() != id_field_name.lower():
@@ -186,19 +198,19 @@ class ChatGPTTool:
         create_table_query += ")"
         cursor.execute(create_table_query)
 
-        # Insert data into the table
-        if isinstance(json_data, list):
-            for item in json_data:
+    def insert_data_list(self, cursor, table_name, json_data_list):
+        for item in json_data_list:
+            if item:
                 values = tuple(str(value) for value in item.values())
-                insert_query = f"INSERT OR IGNORE INTO {table_name} ({','.join(item.keys())}) VALUES ({','.join(['?'] * len(values))})"
-                cursor.execute(insert_query, values)
-        else:
-            values = tuple(str(value) for value in json_data.values())
-            if len(column_names) != len(values):
-                print(f"Skipping import for table: {table_name} (column count mismatch)")
-                return
-            insert_query = f"INSERT OR IGNORE INTO {table_name} ({','.join(json_data.keys())}) VALUES ({','.join(['?'] * len(values))})"
-            cursor.execute(insert_query, values)
+                self.insert_data(cursor, table_name, item.keys(), values)
+
+    def insert_data_single(self, cursor, table_name, json_data):
+        values = tuple(str(value) for value in json_data.values())
+        self.insert_data(cursor, table_name, json_data.keys(), values)
+
+    def insert_data(self, cursor, table_name, column_names, values):
+        insert_query = f"INSERT OR IGNORE INTO {table_name} ({','.join(column_names)}) VALUES ({','.join(['?'] * len(values))})"
+        cursor.execute(insert_query, values)
 
     # show
     ###########################################################################
@@ -364,26 +376,9 @@ class ChatGPTTool:
             print(f"Error: Data directory not found: {data_path}")
             return
 
-        self.traverse_files(data_path, self.inspect_file)
+        self.traverse_files(data_path, self.inspect_json_data)
 
-    def inspect_file(self, file_path):
-        print(f"Inspecting data from: {file_path}")
-        if file_path.endswith(".json"):
-            with open(file_path) as file:
-                json_data = json.load(file)
-                self.inspect_json_data(json_data)
-        elif file_path.endswith(".html"):
-            with open(file_path) as file:
-                html_content = file.read()
-                json_data = self.extract_json_from_html(html_content)
-                if json_data:
-                    self.inspect_json_data(json_data)
-                else:
-                    print("Warning: No JSON data found in the HTML file.")
-        else:
-            print("Warning: Unexpected file format.")
-
-    def inspect_json_data(self, json_data):
+    def inspect_json_data(self, json_data, table_name=None):
         if not json_data:
             print("Warning: JSON data is empty.")
             return
@@ -391,6 +386,9 @@ class ChatGPTTool:
         if not isinstance(json_data, list) or not all(isinstance(item, dict) for item in json_data):
             print("Warning: Invalid JSON data format. Expected a list of dictionaries.")
             return
+
+        if table_name:
+            print(f"Table Name: {table_name}")
 
         if json_data:
             print(f"Schema: {list(json_data[0].keys())}")
