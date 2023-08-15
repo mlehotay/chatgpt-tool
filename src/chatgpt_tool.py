@@ -52,11 +52,14 @@ class ChatGPTTool:
         export_parser = subparsers.add_parser("export", help="Export conversations from the SQLite database")
         export_parser.add_argument("path", help="Output directory for export")
         export_parser.add_argument("-db", "--db-name", dest="db_name", default=self.DEFAULT_DB_NAME, help="Name of the SQLite database (default: chatgpt.db)")
-        export_parser.add_argument("--format", choices=["html", "json"], default="html", help="Export format (default: html)")
+        export_parser.add_argument("-html", action="store_true", help="Export conversations as HTML files")
+        export_parser.add_argument("-text", action="store_true", help="Export conversations as plain text files")
+        export_parser.add_argument("-json", action="store_true", help="Export conversations as JSON files (default)")
+        export_parser.add_argument("-prefix", dest="prefix", help="Export conversations with IDs starting with the specified prefix")
 
         # Subcommand: print
         print_parser = subparsers.add_parser("print", help="Print conversation")
-        print_parser.add_argument("id_prefix", help="Conversation ID prefix to find and print.")
+        print_parser.add_argument("prefix", help="Conversation ID prefix to find and print.")
         print_parser.add_argument("-db", "--db-name", dest="db_name", default=self.DEFAULT_DB_NAME, help="Name of the SQLite database (default: chatgpt.db)")
 
         # Subcommand: inspect
@@ -309,7 +312,7 @@ class ChatGPTTool:
     ###########################################################################
 
     def export_conversations(self, db_name, output_directory=None, export_format="html", prefix=None):
-        output_directory = output_directory or self.DEFAULT_DATA_PATH
+        output_directory = output_directory or self.DEFAULT_EXPORT_PATH
 
         if not os.path.exists(output_directory):
             os.makedirs(output_directory)
@@ -372,6 +375,36 @@ class ChatGPTTool:
             json.dump(conversation, file, indent=4)
         print(f"Exported conversation {conversation_id} as JSON to {output_file}")
 
+    def export_conversation_plain_text(self, db_name, conversation_ids, output_directory=None):
+        output_directory = output_directory or self.DEFAULT_EXPORT_PATH
+
+        if not os.path.exists(output_directory):
+            os.makedirs(output_directory)
+
+        conn = sqlite3.connect(db_name)
+        cursor = conn.cursor()
+
+        conversations = self.get_conversations_by_ids(cursor, conversation_ids)
+
+        if conversations:
+            for conversation in conversations:
+                conversation_id = conversation["id"]
+                self.export_conversation_as_plain_text(conversation_id, conversation, output_directory)
+        else:
+            print("No conversations found.")
+
+        conn.close()
+
+    def export_conversation_as_plain_text(self, conversation_id, conversation, output_directory):
+        output_file = os.path.join(output_directory, f"{conversation_id}.txt")
+
+        with open(output_file, "w") as file:
+            file.write(f"Conversation ID: {conversation_id}\n")
+            for key, value in conversation.items():
+                file.write(f"{key}: {value}\n")
+
+        print(f"Exported conversation {conversation_id} as plain text to {output_file}")
+
     def export_table_as_json(self, cursor, table_name):
         cursor.execute(f"SELECT * FROM {table_name}")
         rows = cursor.fetchall()
@@ -385,13 +418,52 @@ class ChatGPTTool:
 
         return json_data
 
-    # print
-    ###########################################################################
+    def export_database_as_json(self, db_name, output_directory=None):
+        output_directory = output_directory or self.DEFAULT_DATA_PATH
 
-    def print_conversation(self, db_name, conversation_id):
+        if not os.path.exists(output_directory):
+            os.makedirs(output_directory)
+
         conn = sqlite3.connect(db_name)
         cursor = conn.cursor()
 
+        tables = self.get_table_names(cursor)
+
+        for table in tables:
+            json_data = self.export_table_as_json(cursor, table)
+
+            if json_data:
+                output_file = os.path.join(output_directory, f"{table}.json")
+
+                with open(output_file, "w") as file:
+                    json.dump(json_data, file, indent=4)
+
+                print(f"Exported {table} table as JSON to: {output_file}")
+
+        conn.close()
+
+    # print
+    ###########################################################################
+
+    def print_conversation(self, db_name, prefix):
+        conn = sqlite3.connect(db_name)
+        cursor = conn.cursor()
+
+        conversation_ids = self.get_matching_conversation_ids(cursor, prefix)
+
+        if conversation_ids:
+            for conversation_id in conversation_ids:
+                self.print_single_conversation(cursor, conversation_id)
+        else:
+            print(f"No conversations found with prefix: {prefix}")
+
+        conn.close()
+
+    def get_matching_conversation_ids(self, cursor, prefix):
+        cursor.execute(f"SELECT id FROM {self.CHAT_TABLE} WHERE id LIKE ?", (f"{prefix}%",))
+        return [row[0] for row in cursor.fetchall()]
+
+    def print_single_conversation(self, cursor, conversation_id):
         cursor.execute(f"SELECT * FROM {self.CHAT_TABLE} WHERE id = ?", (conversation_id,))
         row = cursor.fetchone()
 
@@ -402,10 +474,9 @@ class ChatGPTTool:
             print(f"Conversation ID: {conversation_id}")
             for key, value in conversation.items():
                 print(f"{key}: {value}")
+            print()
         else:
             print(f"Conversation not found: {conversation_id}")
-
-        conn.close()
 
     # inspect
     ###########################################################################
@@ -452,14 +523,21 @@ class ChatGPTTool:
             print("Action: Display database information")
             self.info(args.db_name)
         elif args.subcommand == "export":
-            print("Action: Export conversations")
-            self.export_conversations(args.db_name, args.path, args.format, args.prefix)
+            if args.text:
+                print("Action: Export conversations as plain text")
+                self.export_conversations_as_text(args.db_name, args.path, args.prefix)
+            elif args.html:
+                print("Action: Export conversations as HTML")
+                self.export_conversations_as_html(args.db_name, args.path, args.prefix)
+            else:
+                print("Action: Export entire database as JSON")
+                self.export_database_as_json(args.db_name, args.path)
         elif args.subcommand == "print":
             print("Action: Print conversation")
-            if args.id_prefix:
-                self.print_conversation(args.db_name, args.id_prefix)
+            if args.prefix:
+                self.print_conversation(args.db_name, args.prefix)
             else:
-                print("Error: 'print' subcommand requires the 'id_prefix' argument.")
+                print("Error: 'print' subcommand requires the 'prefix' argument.")
         elif args.subcommand == "inspect":
             print("Action: Inspect data files")
             self.inspect_data(args.path)
