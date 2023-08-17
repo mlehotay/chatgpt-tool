@@ -12,12 +12,20 @@ class ImportTestCase(unittest.TestCase):
     def setUp(self):
         # Create a temporary directory to simulate data files
         self.data_dir = tempfile.mkdtemp()
+        self.db_dir = tempfile.mkdtemp()  # Create a directory for the temporary database
         self.db_name = "test_db.sqlite"
-        self.tool = ChatGPTTool()
+        self.db_path = os.path.join(self.db_dir, self.db_name)
+        self.tool = ChatGPTTool(self.db_path)  # Pass the temp database path to the tool
 
     def tearDown(self):
         # Remove the temporary directory and its contents
         shutil.rmtree(self.data_dir)
+        shutil.rmtree(self.db_dir)  # Remove the temporary database directory
+
+    def create_empty_file(self, file_name):
+        file_path = os.path.join(self.data_dir, file_name)
+        open(file_path, 'w').close()  # Create an empty file
+        return file_path
 
     def create_temp_json_file(self, data, file_name):
         file_path = os.path.join(self.data_dir, file_name)
@@ -53,6 +61,55 @@ class ImportTestCase(unittest.TestCase):
             f.write(html_content)
 
         return file_path
+
+    def test_import_empty_json_file(self):
+        # Test importing an empty JSON file
+        empty_file_path = self.create_temp_json_file({}, 'empty.json')
+
+        self.tool.import_data(self.tool.DEFAULT_DB_NAME, empty_file_path)
+
+        # Query the database to check if the data was imported
+        result = self.tool.query_table("user", "id", 'alice')
+        self.assertIsNone(result)
+
+    def test_import_single_json_object(self):
+        # Test importing a JSON object
+        data = {'id': 'alice', 'email': 'alice@example.com'}
+        file_path = self.create_temp_json_file(data, 'single.json')
+
+        self.tool.import_data(self.tool.DEFAULT_DB_NAME, file_path)
+
+        # Query the database to check if the data was imported
+        result = self.tool.query_table("user", "id", 'alice')
+        self.assertEqual(result['email'], 'alice@example.com')
+
+    def test_import_empty_json_list(self):
+        # Test importing an empty JSON list
+        data = []
+        file_path = self.create_temp_json_file(data, 'empty_list.json')
+
+        self.tool.import_data(self.tool.DEFAULT_DB_NAME, file_path)
+
+        # Query the database to check if the data was imported
+        result = self.tool.query_table("user", "id", 'alice')
+        self.assertIsNone(result)
+
+    def test_import_json_list_with_objects(self):
+        # Test importing a JSON list containing objects
+        data = [
+            {'id': 'bob', 'email': 'bob@example.com'},
+            {'id': 'carol', 'email': 'carol@example.com'}
+        ]
+        file_path = self.create_temp_json_file(data, 'list_with_objects.json')
+
+        self.tool.import_data(self.tool.DEFAULT_DB_NAME, file_path)
+
+        # Query the database to check if the data was imported
+        result_bob = self.tool.query_table("user", "id", 'bob')
+        self.assertEqual(result_bob['email'], 'bob@example.com')
+
+        result_carol = self.tool.query_table("user", "id", 'carol')
+        self.assertEqual(result_carol['email'], 'carol@example.com')
 
     def test_import_single_json_file(self):
         # Test importing from a single JSON file

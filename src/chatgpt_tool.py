@@ -30,7 +30,8 @@ class ChatGPTTool:
     # init
     ###########################################################################
 
-    def __init__(self):
+    def __init__(self, db_path=None):
+        self.db_path = db_path or self.DEFAULT_DB_NAME
         self.parser = argparse.ArgumentParser(prog="chatgpt_tool", description="ChatGPT Tool")
 
         subparsers = self.parser.add_subparsers(title="subcommands", dest="subcommand")
@@ -85,6 +86,7 @@ class ChatGPTTool:
                     file_path = os.path.join(root, filename)
                     self.traverse_files(file_path, process_function, *args)
         elif path.endswith(".zip"):
+            # print(f"Importing zip file '{path}'")
             with tempfile.TemporaryDirectory() as temp_dir:
                 with zipfile.ZipFile(path, "r") as zip_file:
                     for name in zip_file.namelist():
@@ -99,23 +101,31 @@ class ChatGPTTool:
         _, file_extension = os.path.splitext(path)
         table_name = None
 
-        if file_extension.lower() == ".json":
-            with open(path) as file:
-                json_data = json.load(file)
-                table_name = self.get_table_name(path)
-                process_function(*args, json_data, table_name)
-        elif file_extension.lower() == ".html":
-            with open(path) as file:
-                html_content = file.read()
-                json_data = self.extract_json_from_html(html_content)
-                if json_data:
-                    html_basename = self.get_table_name(path)
-                    table_name = self.HTML_TO_JSON_MAPPING.get(html_basename, html_basename)
+        try:
+            if os.path.getsize(path) == 0:
+                print(f"Warning: Skipping empty file '{path}'")
+            elif file_extension.lower() == ".json":
+                # print(f"Importing JSON file '{path}'")
+                with open(path) as file:
+                    json_data = json.load(file)
+                    table_name = self.get_table_name(path)
                     process_function(*args, json_data, table_name)
-                else:
-                    print("Warning: No JSON data found in the HTML file.")
-        else:
-            print("Warning: Unexpected file format.")
+            elif file_extension.lower() == ".html":
+                # print(f"Importing HTML file '{path}'")
+                with open(path) as file:
+                    html_content = file.read()
+                    json_data = self.extract_json_from_html(html_content)
+                    if json_data:
+                        html_basename = self.get_table_name(path)
+                        table_name = self.HTML_TO_JSON_MAPPING.get(html_basename, html_basename)
+                        process_function(*args, json_data, table_name)
+                    else:
+                        print("Warning: No JSON data found in the HTML file.")
+            else:
+                print("Warning: Unexpected file format.")
+        except Exception as e:
+            print(f"Error processing file '{path}': {e}")
+
 
     def get_table_name(self, file_path):
         base_filename = os.path.basename(file_path)
@@ -337,7 +347,7 @@ class ChatGPTTool:
         conn.close()
 
     def export_conversation(self, db_name, conversation_id, output_directory=None, export_format="html"):
-        output_directory = output_directory or self.DEFAULT_DATA_PATH
+        output_directory = output_directory or self.DEFAULT_EXPORT_PATH
 
         if not os.path.exists(output_directory):
             os.makedirs(output_directory)
@@ -419,7 +429,7 @@ class ChatGPTTool:
         return json_data
 
     def export_database_as_json(self, db_name, output_directory=None):
-        output_directory = output_directory or self.DEFAULT_DATA_PATH
+        output_directory = output_directory or self.DEFAULT_EXPORT_PATH
 
         if not os.path.exists(output_directory):
             os.makedirs(output_directory)
@@ -459,10 +469,6 @@ class ChatGPTTool:
 
         conn.close()
 
-    def get_matching_conversation_ids(self, cursor, prefix):
-        cursor.execute(f"SELECT id FROM {self.CHAT_TABLE} WHERE id LIKE ?", (f"{prefix}%",))
-        return [row[0] for row in cursor.fetchall()]
-
     def print_single_conversation(self, cursor, conversation_id):
         cursor.execute(f"SELECT * FROM {self.CHAT_TABLE} WHERE id = ?", (conversation_id,))
         row = cursor.fetchone()
@@ -472,11 +478,41 @@ class ChatGPTTool:
             conversation = dict(zip(column_names, row))
 
             print(f"Conversation ID: {conversation_id}")
-            for key, value in conversation.items():
-                print(f"{key}: {value}")
+            messages = self.get_conversation_messages(conversation)
+            for message in messages:
+                print(f"{message['author']}: {message['text']}")
             print()
         else:
             print(f"Conversation not found: {conversation_id}")
+
+    def get_matching_conversation_ids(self, cursor, prefix):
+        cursor.execute(f"SELECT id FROM {self.CHAT_TABLE} WHERE id LIKE ?", (f"{prefix}%",))
+        return [row[0] for row in cursor.fetchall()]
+
+    def get_conversation_messages(self, conversation):
+        messages = []
+        current_node = conversation["current_node"]
+        mapping = conversation["mapping"]
+
+        while current_node is not None:
+            node = mapping[current_node]
+            if (
+                "message" in node
+                and node["message"]
+                and "content" in node["message"]
+                and node["message"]["content"]["content_type"] == "text"
+                and "parts" in node["message"]["content"]
+                and node["message"]["content"]["parts"]
+                and len(node["message"]["content"]["parts"][0]) > 0
+                and node["message"]["author"]["role"] != "system"
+            ):
+                author = node["message"]["author"]["role"]
+                if author == "assistant":
+                    author = "ChatGPT"
+                messages.append({"author": author, "text": node["message"]["content"]["parts"][0]})
+            current_node = node["parent"]
+
+        return messages[::-1]
 
     # inspect
     ###########################################################################
@@ -550,3 +586,42 @@ class ChatGPTTool:
 if __name__ == "__main__":
     tool = ChatGPTTool()
     tool.run()
+
+
+
+
+
+
+    def run(self):
+        args = self.parser.parse_args()
+
+        if args.subcommand == "import":
+            print("Action: Import")
+            self.import_data(self.db_path, args.path)
+        elif args.subcommand == "show":
+            print("Action: Display database tables")
+            self.print_tables(self.db_path)
+        elif args.subcommand == "info":
+            print("Action: Display database information")
+            self.info(self.db_path)
+        elif args.subcommand == "export":
+            if args.text:
+                print("Action: Export conversations as plain text")
+                self.export_conversations_as_text(self.db_path, args.path, args.prefix)
+            elif args.html:
+                print("Action: Export conversations as HTML")
+                self.export_conversations_as_html(self.db_path, args.path, args.prefix)
+            else:
+                print("Action: Export entire database as JSON")
+                self.export_database_as_json(self.db_path, args.path)
+        elif args.subcommand == "print":
+            print("Action: Print conversation")
+            if args.prefix:
+                self.print_conversation(self.db_path, args.prefix)
+            else:
+                print("Error: 'print' subcommand requires the 'prefix' argument.")
+        elif args.subcommand == "inspect":
+            print("Action: Inspect data files")
+            self.inspect_data(args.path)
+        else:
+            self.parser.print_help()
