@@ -66,7 +66,7 @@ class ImportTestCase(unittest.TestCase):
         # Test importing an empty JSON file
         empty_file_path = self.create_temp_json_file({}, 'empty.json')
 
-        self.tool.import_data(self.tool.DEFAULT_DB_NAME, empty_file_path)
+        self.tool.import_data(self.tool.DB_NAME, empty_file_path)
 
         # Query the database to check if the data was imported
         result = self.tool.query_table("user", "id", 'alice')
@@ -77,7 +77,7 @@ class ImportTestCase(unittest.TestCase):
         data = {'id': 'alice', 'email': 'alice@example.com'}
         file_path = self.create_temp_json_file(data, 'single.json')
 
-        self.tool.import_data(self.tool.DEFAULT_DB_NAME, file_path)
+        self.tool.import_data(self.tool.DB_NAME, file_path)
 
         # Query the database to check if the data was imported
         result = self.tool.query_table("user", "id", 'alice')
@@ -88,7 +88,7 @@ class ImportTestCase(unittest.TestCase):
         data = []
         file_path = self.create_temp_json_file(data, 'empty_list.json')
 
-        self.tool.import_data(self.tool.DEFAULT_DB_NAME, file_path)
+        self.tool.import_data(self.tool.DB_NAME, file_path)
 
         # Query the database to check if the data was imported
         result = self.tool.query_table("user", "id", 'alice')
@@ -102,7 +102,7 @@ class ImportTestCase(unittest.TestCase):
         ]
         file_path = self.create_temp_json_file(data, 'list_with_objects.json')
 
-        self.tool.import_data(self.tool.DEFAULT_DB_NAME, file_path)
+        self.tool.import_data(self.tool.DB_NAME, file_path)
 
         # Query the database to check if the data was imported
         result_bob = self.tool.query_table("user", "id", 'bob')
@@ -116,7 +116,7 @@ class ImportTestCase(unittest.TestCase):
         data = {'id': 'alice', 'email': 'alice@example.com', 'chatgpt_plus_user': 'false', 'phone_number': '+14165551212'}
         file_path = self.create_temp_json_file(data, 'user.json')
 
-        self.tool.import_data(self.tool.DEFAULT_DB_NAME, file_path)
+        self.tool.import_data(self.tool.DB_NAME, file_path)
 
         # Query the database to fetch the data and compare
         result = self.tool.query_table("user", "id", "alice")
@@ -128,7 +128,7 @@ class ImportTestCase(unittest.TestCase):
         script_content = json.dumps({'id': 'eve', 'email': 'eve@example.com'})
         file_path = self.create_temp_html_file(script_content, 'user.html')
 
-        self.tool.import_data(self.tool.DEFAULT_DB_NAME, file_path)
+        self.tool.import_data(self.tool.DB_NAME, file_path)
         # Perform assertions to check if the data is imported correctly
 
     def test_import_zip_with_single_json_file(self):
@@ -136,7 +136,7 @@ class ImportTestCase(unittest.TestCase):
         data = {'user.json': {'id': 'bob', 'email': 'bob@example.com', 'chatgpt_plus_user': 'false', 'phone_number': '+16175556666'}}
         zip_path = self.create_temp_zip_archive(data, 'archive.zip')
 
-        self.tool.import_data(self.tool.DEFAULT_DB_NAME, zip_path)
+        self.tool.import_data(self.tool.DB_NAME, zip_path)
         # Perform assertions to check if the data is imported correctly
 
     def test_import_zip_with_multiple_json_files(self):
@@ -145,7 +145,7 @@ class ImportTestCase(unittest.TestCase):
                 'user2.json': {'id': 'dave', 'email': 'dave@example.com', 'chatgpt_plus_user': 'false', 'phone_number': '+4125552023'}}
         zip_path = self.create_temp_zip_archive(data, 'archive.zip')
 
-        self.tool.import_data(self.tool.DEFAULT_DB_NAME, zip_path)
+        self.tool.import_data(self.tool.DB_NAME, zip_path)
         # Perform assertions to check if the data is imported correctly
 
     def test_import_directory_with_json_files(self):
@@ -157,7 +157,7 @@ class ImportTestCase(unittest.TestCase):
         self.create_temp_json_file(data1, 'user1.json')
         self.create_temp_json_file(data2, 'user2.json')
 
-        self.tool.import_data(self.tool.DEFAULT_DB_NAME, data_dir)
+        self.tool.import_data(self.tool.DB_NAME, data_dir)
         # Perform assertions to check if the data is imported correctly
 
     def test_import_directory_with_archives(self):
@@ -169,7 +169,7 @@ class ImportTestCase(unittest.TestCase):
         self.create_temp_zip_archive({'user.json': data1}, 'archive1.zip')
         self.create_temp_zip_archive({'user.json': data2}, 'archive2.zip')
 
-        self.tool.import_data(self.tool.DEFAULT_DB_NAME, data_dir)
+        self.tool.import_data(self.tool.DB_NAME, data_dir)
         # Perform assertions to check if the data is imported correctly
 
 if __name__ == '__main__':

@@ -1,6 +1,8 @@
 import unittest
 import json
 import os
+import random
+from datetime import datetime, timedelta
 
 class TestDataGenerationAndImport(unittest.TestCase):
 
@@ -23,11 +25,11 @@ class TestDataGenerationAndImport(unittest.TestCase):
 
     @classmethod
     def generate_test_data(cls):
-        conversations_data = [generate_conversation() for _ in range(5)]
-        user_data = [generate_user() for _ in range(10)]
-        message_feedback_data = [generate_message_feedback() for _ in range(20)]
-        model_comparison_data = [generate_model_comparison() for _ in range(10)]
-        shared_conversations_data = [generate_shared_conversation() for _ in range(5)]
+        conversations_data = [cls.generate_conversation() for _ in range(5)]
+        user_data = [cls.generate_user() for _ in range(10)]
+        message_feedback_data = [cls.generate_message_feedback() for _ in range(20)]
+        model_comparison_data = [cls.generate_model_comparison() for _ in range(10)]
+        shared_conversations_data = [cls.generate_shared_conversation() for _ in range(5)]
 
         with open(cls.conversations_file, 'w') as f:
             json.dump(conversations_data, f, indent=2)
@@ -69,9 +71,8 @@ class TestDataGenerationAndImport(unittest.TestCase):
             shared_conversations_data = json.load(f)
         self.assertIsInstance(shared_conversations_data, list)
 
-###############################################################################
-
-    def generate_user():
+    @classmethod
+    def generate_user(cls):
         user = {
             "id": str(random.randint(1, 100)),
             "username": "user_" + str(random.randint(1, 100)),
@@ -80,7 +81,8 @@ class TestDataGenerationAndImport(unittest.TestCase):
         }
         return user
 
-    def generate_message_feedback():
+    @classmethod
+    def generate_message_feedback(cls):
         feedback = {
             "id": str(random.randint(1, 100)),
             "message_id": str(random.randint(1, 100)),
@@ -90,7 +92,8 @@ class TestDataGenerationAndImport(unittest.TestCase):
         }
         return feedback
 
-    def generate_model_comparison():
+    @classmethod
+    def generate_model_comparison(cls):
         comparison = {
             "id": str(random.randint(1, 100)),
             "model_a": "model_" + str(random.randint(1, 5)),
@@ -100,7 +103,8 @@ class TestDataGenerationAndImport(unittest.TestCase):
         }
         return comparison
 
-    def generate_conversation(num_messages=5):
+    @classmethod
+    def generate_conversation(cls, num_messages=5):
         conversation = {
             "title": f"Conversation {random.randint(1, 100)}",
             "create_time": (datetime.now() - timedelta(days=random.randint(1, 365))).timestamp(),
@@ -136,7 +140,8 @@ class TestDataGenerationAndImport(unittest.TestCase):
 
         return conversation
 
-    def generate_shared_conversation():
+    @classmethod
+    def generate_shared_conversation(cls):
         shared_conversation = {
             "id": str(random.randint(1, 100)),
             "conversation_id": str(random.randint(1, 100)),
@@ -144,29 +149,6 @@ class TestDataGenerationAndImport(unittest.TestCase):
             "share_time": (datetime.now() - timedelta(days=random.randint(1, 365))).timestamp()
         }
         return shared_conversation
-
-    # Generate test data and write to JSON files
-    def generate_test_data():
-        conversations_data = [generate_conversation() for _ in range(5)]
-        user_data = [generate_user() for _ in range(10)]
-        message_feedback_data = [generate_message_feedback() for _ in range(20)]
-        model_comparison_data = [generate_model_comparison() for _ in range(10)]
-        shared_conversations_data = [generate_shared_conversation() for _ in range(5)]
-
-        with open('conversations.json', 'w') as f:
-            json.dump(conversations_data, f, indent=2)
-
-        with open('user.json', 'w') as f:
-            json.dump(user_data, f, indent=2)
-
-        with open('message_feedback.json', 'w') as f:
-            json.dump(message_feedback_data, f, indent=2)
-
-        with open('model_comparisons.json', 'w') as f:
-            json.dump(model_comparison_data, f, indent=2)
-
-        with open('shared_conversations.json', 'w') as f:
-            json.dump(shared_conversations_data, f, indent=2)
 
 if __name__ == '__main__':
     unittest.main()
