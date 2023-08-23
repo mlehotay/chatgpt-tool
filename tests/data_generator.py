@@ -5,6 +5,95 @@ from datetime import datetime, timedelta
 
 class DataGenerator:
 
+    # Data type generators
+    ###########################################################################
+
+    @classmethod
+    def generate_user(cls):
+        user = {
+            "id": cls.random_user_id(),
+            "email": cls.random_email(),
+            "chatgpt_plus_user": cls.random_boolean(),
+            "phone_number": cls.random_phone()
+        }
+        return user
+
+    @classmethod
+    def generate_message_feedback(cls):
+        feedback = {
+            "id": str(random.randint(1, 100)),
+            "message_id": str(random.randint(1, 100)),
+            "feedback_type": random.choice(["positive", "negative", "neutral"]),
+            "user_id": str(random.randint(1, 100)),
+            "create_time": (datetime.now() - timedelta(days=random.randint(1, 30))).timestamp()
+        }
+        return feedback
+
+    @classmethod
+    def generate_model_comparison(cls):
+        comparison = {
+            "id": str(random.randint(1, 100)),
+            "model_a": "model_" + str(random.randint(1, 5)),
+            "model_b": "model_" + str(random.randint(6, 10)),
+            "preferred_model": random.choice(["model_a", "model_b"]),
+            "create_time": (datetime.now() - timedelta(days=random.randint(1, 7))).timestamp()
+        }
+        return comparison
+
+    @classmethod
+    def generate_conversation(cls, num_messages=5):
+        conversation = {
+            "title": f"Conversation {random.randint(1, 100)}",
+            "create_time": (datetime.now() - timedelta(days=random.randint(1, 365))).timestamp(),
+            "update_time": datetime.now().timestamp(),
+            "mapping": {},
+            "moderation_results": [],
+            "current_node": "root",
+            "plugin_ids": None,
+            "conversation_id": str(random.randint(1, 100)),
+            "conversation_template_id": None,
+            "id": str(random.randint(1, 100))
+        }
+
+        for _ in range(num_messages):
+            message_id = str(random.randint(1, 100))
+            conversation["mapping"][message_id] = {
+                "id": message_id,
+                "message": {
+                    "id": message_id,
+                    "author": "user_" + str(random.randint(1, 100)),
+                    "create_time": (datetime.now() - timedelta(days=random.randint(1, 30))).timestamp(),
+                    "update_time": datetime.now().timestamp(),
+                    "content": f"Message {message_id} content",
+                    "status": "active",
+                    "end_turn": False,
+                    "weight": random.random(),
+                    "metadata": {},
+                    "recipient": None
+                },
+                "parent": None,
+                "children": []
+            }
+
+        return conversation
+
+    @classmethod
+    def generate_shared_conversation(cls):
+        shared_conversation = {
+            "id": cls.random_uuid(),
+            "conversation_id": cls.random_uuid(),
+            "title": cls.random_title(),
+            "is_anonymous": cls.random_boolean()
+        }
+        return shared_conversation
+
+    @classmethod
+    def generate_chat(cls):
+        pass
+
+    # Random value generators
+    ###########################################################################
+
     corpus = """Lorem ipsum dolor sit amet consectetur adipiscing elit sed do eiusmod tempor incididunt ut labore et dolore magna aliqua
     Ut enim ad minim veniam quis nostrud exercitation ullamco laboris nisi ut aliquip ex ea commodo consequat
     Duis aute irure dolor in reprehenderit in voluptate velit esse cillum dolore eu fugiat nulla pariatur
@@ -12,8 +101,6 @@ class DataGenerator:
 
     @staticmethod
     def random_email():
-        #random_username = ''.join(random.choice(string.ascii_letters) for _ in range(8))
-        #random_domain = ''.join(random.choice(string.ascii_lowercase) for _ in range(5))
         username = DataGenerator.random_string()
         domain = random.choice(["gmail.com", "example.com", "yahoo.com"])
         return f"{username}@{domain}"
@@ -41,7 +128,7 @@ class DataGenerator:
     @staticmethod
     def random_phrase():
         num_words = random.randint(3, 10)
-        words = random.sample(lorem_ipsum_words, num_words)
+        words = random.sample(DataGenerator.corpus.split(), num_words)
         return ' '.join(words)
 
     @staticmethod
@@ -64,6 +151,9 @@ class DataGenerator:
         random_part = ''.join(random.choice(characters) for _ in range(24))
         return f"user-{random_part}"
 
+# Unit tests
+###############################################################################
+
 class TestDataGenerator(unittest.TestCase):
     def test_random_email(self):
         email = DataGenerator.random_email()
@@ -83,7 +173,7 @@ class TestDataGenerator(unittest.TestCase):
 
     def test_random_phrase(self):
         phrase = DataGenerator.random_phrase()
-        self.assertTrue(phrase in lorem_ipsum_words)
+        self.assertTrue(phrase in DataGenerator.corpus)
 
 if __name__ == '__main__':
     unittest.main()

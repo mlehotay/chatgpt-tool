@@ -62,6 +62,8 @@ class ImportTestCase(unittest.TestCase):
 
         return file_path
 
+class TestDataTraveral(ImportTestCase):
+
     def test_import_empty_json_file(self):
         # Test importing an empty JSON file
         empty_file_path = self.create_temp_json_file({}, 'empty.json')
