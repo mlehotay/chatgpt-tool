@@ -35,6 +35,7 @@ class ChatGPTTool:
     ###########################################################################
 
     def __init__(self, db_path=None):
+        self.verbose = True
         self.db_path = db_path or self.DB_NAME
         self.parser = argparse.ArgumentParser(prog="chatgpt_tool", description="ChatGPT Tool")
 
@@ -179,52 +180,44 @@ class ChatGPTTool:
         return []
 
     def import_json_data_to_sqlite(self, cursor, json_data, table_name):
-        if not json_data: # Check if the JSON data is empty (in list format)
-            print(f"Skipping import for table: {table_name} (empty JSON data)")
+        if not json_data:
+            if(self.verbose):
+                print(f"Skipping import for table: {table_name} (empty JSON data)")
             return
 
         id_field_name, column_names = self.get_id_and_column_names(json_data)
         if not id_field_name:
-            print(f"Skipping import for table: {table_name} (no 'id' field found)")
+            if(self.verbose):
+                print(f"Skipping import for table: {table_name} (no 'id' field found)")
             return
 
-        elif isinstance(json_data, list):
-            if json_data and isinstance(json_data[0], dict): # Check if it's a list of dictionaries
-                existing_table_name = self.get_existing_table_name(cursor, table_name)
-                if existing_table_name:
-                    existing_column_names = self.get_column_names(cursor, existing_table_name)
-                    new_column_names = sorted(json_data[0].keys())
+        column_names_hash = self.calculate_column_names_hash(column_names)
 
-                    if existing_column_names == new_column_names:
-                        # Same schema and column names, use existing table
-                        table_name = existing_table_name
-                    else:
-                        # Schema changed, create a new table
-                        self.create_table(cursor, table_name, new_column_names)
-                else:
-                    # No table with the same name, create a new table
-                    self.create_table(cursor, table_name, sorted(json_data[0].keys()))
+        existing_table_name = self.get_existing_table_name(cursor, column_names_hash)
+        if existing_table_name:
+            existing_column_names = self.get_column_names(cursor, existing_table_name)
+            if sorted(existing_column_names) == sorted(column_names):
+                # Same schema and column names, use existing table
+                table_name = existing_table_name
             else:
-                print(f"Skipping import for table: {table_name} (invalid JSON data)")
-                return
-        elif not isinstance(json_data, dict): # Check if the JSON data is not in valid dictionary format
-            print(f"Skipping import for table: {table_name} (invalid JSON data)")
-            return
-        elif isinstance(json_data, str): # If the JSON data is a string, try to parse it into a dictionary
-            try:
-                json_data = json.loads(json_data)
-            except json.JSONDecodeError:
-                print(f"Skipping import for table: {table_name} (invalid JSON data)")
-                return
-
-        # Record schema changes
-        self.record_schema_change(cursor, table_name, existing_column_names, new_column_names)
+                # Schema changed, create a new table
+                print(f"Warning: Schema change detected for table: {table_name}")
+                print(f"  previous:{existing_column_names}\n  current:{column_names}")
+                self.create_table(cursor, table_name, id_field_name, column_names)
+                self.record_schema_change(cursor, table_name, existing_column_names, column_names)
+        else:
+            # No table with the same name, create a new table
+            self.create_table(cursor, table_name, id_field_name, column_names)
+            self.record_schema_change(cursor, table_name, column_names, column_names_hash)
 
         # Insert data into the table
         if isinstance(json_data, list):
             self.insert_data_list(cursor, table_name, json_data)
-        else:
+        elif isinstance(json_data, dict):
             self.insert_data_single(cursor, table_name, json_data)
+        else:
+            print(f"Skipping import for table: {table_name} (invalid JSON data)")
+            return
 
     def get_id_and_column_names(self, json_data):
         if isinstance(json_data, list):
@@ -236,7 +229,7 @@ class ChatGPTTool:
         if not id_field_name:
             return None, None
 
-        column_names = first_object.keys()
+        column_names = list(first_object.keys())
         return id_field_name, column_names
 
     def get_column_names(self, cursor, table_name):
@@ -244,8 +237,7 @@ class ChatGPTTool:
         columns_info = cursor.fetchall()
         return [column_info[1] for column_info in columns_info]
 
-    def create_table(self, cursor, table_name, column_names):
-        id_field_name, _ = self.get_id_and_column_names(column_names)
+    def create_table(self, cursor, table_name, id_field_name, column_names):
         create_table_query = f"CREATE TABLE IF NOT EXISTS {table_name} ({id_field_name} TEXT PRIMARY KEY,"
         for column_name in column_names:
             if column_name.lower() != id_field_name.lower():
@@ -257,13 +249,15 @@ class ChatGPTTool:
     def insert_data_list(self, cursor, table_name, json_data_list):
         for item in json_data_list:
             if item:
-                inferred_id_field_name = self.infer_id_field_name(cursor, table_name)
                 values = tuple(str(value) for value in item.values())
-                self.insert_data(cursor, table_name, item.keys(), values, inferred_id_field_name)
+                self.insert_data(cursor, table_name, item.keys(), values)
 
     def insert_data_single(self, cursor, table_name, json_data):
         values = tuple(str(value) for value in json_data.values())
         self.insert_data(cursor, table_name, json_data.keys(), values)
+
+    # inferred_id_field_name = self.infer_id_field_name(cursor, table_name)
+    # self.insert_data(cursor, table_name, item.keys(), values, inferred_id_field_name)
 
     def insert_data(self, cursor, table_name, column_names, values):
         insert_query = f"INSERT OR IGNORE INTO {table_name} ({','.join(column_names)}) VALUES ({','.join(['?'] * len(values))})"
@@ -419,17 +413,22 @@ class ChatGPTTool:
         conn = sqlite3.connect(self.DB_NAME)
         cursor = conn.cursor()
 
-        query = f"SELECT * FROM {table_name} WHERE {condition_field} = ?"
-        cursor.execute(query, (condition_value,))
-        row = cursor.fetchone()
+        try:
+            query = f"SELECT * FROM {table_name} WHERE {condition_field} = ?"
+            cursor.execute(query, (condition_value,))
+            row = cursor.fetchone()
 
-        if row:
-            column_names = [column[0] for column in cursor.description]
-            result = dict(zip(column_names, row))
-        else:
+            if row:
+                column_names = [column[0] for column in cursor.description]
+                result = dict(zip(column_names, row))
+            else:
+                result = None
+        except sqlite3.Error as e:
+            print(f"Error querying table '{table_name}': {e}")
             result = None
+        finally:
+            conn.close()
 
-        conn.close()
         return result
 
     def print_table_schemas(self, conn, print_types=False):
@@ -638,15 +637,13 @@ class ChatGPTTool:
 
     def create_schema_table(self, cursor):
         create_table_query = f"CREATE TABLE IF NOT EXISTS {self.SCHEMA_TABLE} ("
-        create_table_query += "change_id INTEGER PRIMARY KEY AUTOINCREMENT,"
+        create_table_query += "hash_value TEXT PRIMARY KEY,"
         create_table_query += "table_name TEXT,"
-        create_table_query += "old_column_names TEXT,"
-        create_table_query += "new_column_names TEXT)"
+        create_table_query += "column_names TEXT)"
         cursor.execute(create_table_query)
 
-    def record_schema_change(self, cursor, table_name, old_column_names, new_column_names):
-        # Insert schema change record into the schema_changes table
-        cursor.execute(f"INSERT INTO {self.SCHEMA_CHANGES_TABLE} (table_name, old_column_names, new_column_names) VALUES (?, ?, ?)", (table_name, ",".join(old_column_names), ",".join(new_column_names)))
+    def record_schema_change(self, cursor, table_name, column_names, hash_value):
+        cursor.execute(f"INSERT OR IGNORE INTO {self.SCHEMA_TABLE} (hash_value, table_name, column_names) VALUES (?, ?, ?)", (hash_value, table_name, ",".join(column_names)))
 
     def infer_id_field_name(self, cursor, table_name):
         select_query = f"SELECT new_column_name FROM {self.SCHEMA_TABLE} WHERE table_name = ?"
@@ -699,9 +696,9 @@ class ChatGPTTool:
         }
         return hashlib.md5(json.dumps(hash_data, sort_keys=True).encode()).hexdigest()
 
-    def calculate_column_names_hash(self, json_data):
+    def calculate_column_names_hash(self, column_names):
         # Calculate a hash of the column names (use a suitable hash function)
-        column_names = sorted(json_data[0].keys()) if json_data else []
+        column_names = sorted(column_names) if column_names else []
         return hashlib.md5("".join(column_names).encode()).hexdigest()
 
     def get_existing_table_name(self, cursor, column_names_hash):
