@@ -67,7 +67,6 @@ class TestDataGenerationAndImport(unittest.TestCase):
     def test_import_user(self):
         with open(self.user_file, 'r') as f:
             user_data = json.load(f)
-        print(f"user: {user_data}")
         self.assertIsInstance(user_data, list)
 
     def test_import_message_feedback(self):

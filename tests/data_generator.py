@@ -9,14 +9,36 @@ class DataGenerator:
     ###########################################################################
 
     @classmethod
-    def generate_user(cls):
-        user = {
-            "id": cls.random_user_id(),
-            "email": cls.random_email(),
-            "chatgpt_plus_user": cls.random_boolean(),
-            "phone_number": cls.random_phone()
-        }
+    def generate_user(cls, hashcode=None):
+        if hashcode is None or hashcode == 'a1dd9e6ff9fb7b63ed62cde37a101145':
+            user = {
+                "id": cls.random_user_id(),
+                "email": cls.random_email(),
+                "chatgpt_plus_user": cls.random_boolean(),
+                "phone_number": cls.random_phone()
+            }
+        else:
+            schema = cls.get_schema_by_hashcode(hashcode)
+            if schema:
+                user = {}
+                for column_name in schema["column_names"]:
+                    user[column_name] = cls.random_value_for_column(column_name)
+            else:
+                raise ValueError("Invalid schema hashcode")
         return user
+
+    @classmethod
+    def random_value_for_column(cls, column_name):
+        if column_name == "id":
+            return cls.random_user_id()
+        elif column_name == "email":
+            return cls.random_email()
+        elif column_name == "chatgpt_plus_user":
+            return cls.random_boolean()
+        elif column_name == "phone_number":
+            return cls.random_phone()
+        else:
+            return cls.random_string()  # Add handling for other fields
 
     @classmethod
     def generate_message_feedback(cls):
