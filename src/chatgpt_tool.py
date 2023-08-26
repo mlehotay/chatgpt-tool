@@ -37,6 +37,7 @@ class ChatGPTTool:
     def __init__(self, db_path=None):
         self.verbose = True
         self.db_path = db_path or self.DB_NAME
+        self.schema_cache = {}  # Initialize the cache dictionary
         self.parser = argparse.ArgumentParser(prog="chatgpt_tool", description="ChatGPT Tool")
 
         subparsers = self.parser.add_subparsers(title="subcommands", dest="subcommand")
@@ -79,7 +80,6 @@ class ChatGPTTool:
     # and other related helper functions.
     ###########################################################################
 
-
     def import_data(self, db_name, data_path):
         with sqlite3.connect(db_name) as conn:
             self.create_schema_table(conn.cursor())  # Create schema table
@@ -92,7 +92,8 @@ class ChatGPTTool:
                     file_path = os.path.join(root, filename)
                     self.traverse_files(file_path, process_function, *args)
         elif path.endswith(".zip"):
-            # print(f"Importing zip file '{path}'")
+            if self.verbose:
+                print(f"Importing archive '{path}'")
             with tempfile.TemporaryDirectory() as temp_dir:
                 with zipfile.ZipFile(path, "r") as zip_file:
                     for name in zip_file.namelist():
@@ -109,25 +110,22 @@ class ChatGPTTool:
         if self.verbose:
             print(f"Importing file '{path}'")
 
-        try:
-            if os.path.getsize(path) == 0:
-                print(f"Warning: Skipping empty file '{path}'")
-            elif file_extension.lower() == ".json":
-                with open(path) as file:
-                    json_data = json.load(file)
+        if os.path.getsize(path) == 0:
+            print(f"Warning: Skipping empty file '{path}'")
+        elif file_extension.lower() == ".json":
+            with open(path) as file:
+                json_data = json.load(file)
+                process_function(*args, json_data, path)
+        elif file_extension.lower() == ".html":
+            with open(path) as file:
+                html_content = file.read()
+                json_data = self.extract_json_from_html(html_content)
+                if json_data:
                     process_function(*args, json_data, path)
-            elif file_extension.lower() == ".html":
-                with open(path) as file:
-                    html_content = file.read()
-                    json_data = self.extract_json_from_html(html_content)
-                    if json_data:
-                        process_function(*args, json_data, path)
-                    else:
-                        print("Warning: No JSON data found in the HTML file.")
-            else:
-                print("Warning: Unexpected file format.")
-        except Exception as e:
-            print(f"Error processing file '{path}': {e}")
+                else:
+                    print("Warning: No JSON data found in the HTML file.")
+        else:
+            print("Warning: Unexpected file format.")
 
     def get_table_name(self, file_path):
         base_filename = os.path.basename(file_path)
@@ -144,16 +142,19 @@ class ChatGPTTool:
     def get_versioned_table_name(self, cursor, table_name, column_names):
         versioned_table_name = table_name
         version = 1
-        hash1 = self.calculate_column_names_hash(column_names)
+        hash_value = self.calculate_column_names_hash(column_names)
 
         while self.table_exists(cursor, versioned_table_name):
+            if versioned_table_name in self.schema_cache and self.schema_cache[versioned_table_name] == hash_value:
+                break
             hash2 = self.query_single_value("schema", "table_name", versioned_table_name, "hash_value")
-            if hash1 == hash2:
+            if hash_value == hash2:
+                self.schema_cache[versioned_table_name] = hash_value
                 break
             version += 1
             versioned_table_name = f"{table_name}_v{version}"
 
-        return versioned_table_name
+        return versioned_table_name, hash_value
 
     def extract_json_from_html(self, html_content):
         # Parse the HTML content using Gazpacho
@@ -192,41 +193,38 @@ class ChatGPTTool:
                 print(f"Skipping import for file: {path} (empty JSON data)")
             return
 
-        id_field_name, column_names = self.get_id_and_column_names(json_data)
+        cursor = conn.cursor()
+        table_name = self.get_table_name(path)
+
+        if not isinstance(json_data, list):
+            json_data = [json_data]  # Convert single object to a list with a single element
+
+        for json_object in json_data:
+            self.import_single_json_object(cursor, table_name, json_object)
+
+        conn.commit()  # Commit the transaction
+        cursor.close()  # Close the cursor
+
+    def import_single_json_object(self, cursor, table_name, json_object):
+        id_field_name, column_names = self.get_id_and_column_names(json_object)
         if not id_field_name:
             if self.verbose:
-                print(f"Skipping import for file: {path} (no 'id' field found)")
+                print(f"Skipping object in table: {table_name} (no 'id' field found)")
             return
 
-        cursor = conn.cursor()  # Create a cursor from the provided connection
-
-        table_name = self.get_table_name(path)
-        table_name = self.get_versioned_table_name(cursor, table_name, column_names)
-
         try:
+            cursor.execute("BEGIN")
+            table_name, hash_value = self.get_versioned_table_name(cursor, table_name, column_names)
             # Create the table if necessary
             if not self.table_exists(cursor, table_name):
-                hash_value = self.calculate_column_names_hash(column_names)
                 self.create_table(cursor, table_name, id_field_name, column_names)
-                self.record_schema_change(cursor, table_name, column_names, hash_value)
-
+                self.record_schema_change(cursor, hash_value, table_name, column_names)
             # Insert data into the table
-            if isinstance(json_data, list):
-                self.insert_data_list(cursor, table_name, json_data)
-            elif isinstance(json_data, dict):
-                self.insert_data_single(cursor, table_name, json_data)
-            else:
-                print(f"Skipping import for file: {path} (invalid JSON data)")
-                return
-
-            # Commit changes to the database
-            conn.commit()
+            self.insert_data_single(cursor, table_name, json_object)
+            cursor.execute("COMMIT")
         except Exception as e:
-            # Roll back changes in case of an error
-            conn.rollback()
+            cursor.execute("ROLLBACK")
             print(f"Error importing data: {e}")
-        finally:
-            cursor.close()  # Close the cursor
 
     def get_id_and_column_names(self, json_data):
         if isinstance(json_data, list):
@@ -240,11 +238,6 @@ class ChatGPTTool:
 
         column_names = list(first_object.keys())
         return id_field_name, column_names
-
-    def get_column_names(self, cursor, table_name):
-        cursor.execute(f"PRAGMA table_info({table_name});")
-        columns_info = cursor.fetchall()
-        return [column_info[1] for column_info in columns_info]
 
     def create_table(self, cursor, table_name, id_field_name, column_names):
         create_table_query = f"CREATE TABLE IF NOT EXISTS {table_name} ({id_field_name} TEXT PRIMARY KEY,"
@@ -264,9 +257,6 @@ class ChatGPTTool:
     def insert_data_single(self, cursor, table_name, json_data):
         values = tuple(str(value) for value in json_data.values())
         self.insert_data(cursor, table_name, json_data.keys(), values)
-
-    # inferred_id_field_name = self.infer_id_field_name(cursor, table_name)
-    # self.insert_data(cursor, table_name, item.keys(), values, inferred_id_field_name)
 
     def insert_data(self, cursor, table_name, column_names, values):
         insert_query = f"INSERT OR IGNORE INTO {table_name} ({','.join(column_names)}) VALUES ({','.join(['?'] * len(values))})"
@@ -307,6 +297,11 @@ class ChatGPTTool:
     def get_table_names(self, cursor):
         cursor.execute("SELECT name FROM sqlite_master WHERE type='table';")
         return [row[0] for row in cursor.fetchall()]
+
+    def get_column_names(self, cursor, table_name):
+        cursor.execute(f"PRAGMA table_info({table_name});")
+        columns_info = cursor.fetchall()
+        return [column_info[1] for column_info in columns_info]
 
     def get_table_count(self, cursor, table_name):
         cursor.execute(f"SELECT COUNT(*) FROM {table_name};")
@@ -398,7 +393,7 @@ class ChatGPTTool:
         create_table_query += "column_names TEXT)"
         cursor.execute(create_table_query)
 
-    def record_schema_change(self, cursor, table_name, column_names, hash_value):
+    def record_schema_change(self, cursor, hash_value, table_name, column_names):
         cursor.execute(f"INSERT OR IGNORE INTO {self.SCHEMA_TABLE} (hash_value, table_name, column_names) VALUES (?, ?, ?)", (hash_value, table_name, ",".join(column_names)))
 
     def get_schema_by_hash_value(self, hash_value):
