@@ -7,7 +7,12 @@ import shutil
 import tempfile
 import string
 import hashlib
-from gazpacho import Soup
+
+try:
+    from gazpacho import Soup
+    process_html = True
+except ImportError:
+    process_html = False
 
 """
 ChatGPT Tool
@@ -35,7 +40,7 @@ class ChatGPTTool:
     ###########################################################################
 
     def __init__(self, db_path=None):
-        self.verbose = True
+        self.verbose = False
         self.db_path = db_path or self.DB_NAME
         self.schema_cache = {}  # Initialize the cache dictionary
         self.parser = argparse.ArgumentParser(prog="chatgpt_tool", description="ChatGPT Tool")
@@ -117,13 +122,16 @@ class ChatGPTTool:
                 json_data = json.load(file)
                 process_function(*args, json_data, path)
         elif file_extension.lower() == ".html":
-            with open(path) as file:
-                html_content = file.read()
-                json_data = self.extract_json_from_html(html_content)
-                if json_data:
-                    process_function(*args, json_data, path)
-                else:
-                    print("Warning: No JSON data found in the HTML file.")
+            if process_html:
+                with open(path) as file:
+                    html_content = file.read()
+                    json_data = self.extract_json_from_html(html_content)
+                    if json_data:
+                        process_function(*args, json_data, path)
+                    else:
+                        print("Warning: No JSON data found in the HTML file.")
+            else:
+                print("Warning: Parser not available. Skipping HTML file.")
         else:
             print("Warning: Unexpected file format.")
 
@@ -188,6 +196,8 @@ class ChatGPTTool:
         return []
 
     def import_json_data_to_sqlite(self, conn, json_data, path):
+        if not isinstance(json_data, list):
+            json_data = [json_data]  # Convert single object to a list with a single element
         if not json_data:
             if self.verbose:
                 print(f"Skipping import for file: {path} (empty JSON data)")
@@ -195,9 +205,6 @@ class ChatGPTTool:
 
         cursor = conn.cursor()
         table_name = self.get_table_name(path)
-
-        if not isinstance(json_data, list):
-            json_data = [json_data]  # Convert single object to a list with a single element
 
         for json_object in json_data:
             self.import_single_json_object(cursor, table_name, json_object)
@@ -208,8 +215,8 @@ class ChatGPTTool:
     def import_single_json_object(self, cursor, table_name, json_object):
         id_field_name, column_names = self.get_id_and_column_names(json_object)
         if not id_field_name:
-            if self.verbose:
-                print(f"Skipping object in table: {table_name} (no 'id' field found)")
+            if self.verbose: # fixme: not all tables have keys, need to stop requiring this
+                print(f"Skipping object in table: {table_name} (no 'id' field found) {json_object}")
             return
 
         try:
@@ -277,7 +284,8 @@ class ChatGPTTool:
         tables = self.get_table_names(cursor)
         table_stats = []
         for table in tables:
-            table_stats.append((table, self.get_table_count(cursor, table)))
+            column_names = self.get_column_names(cursor, table)
+            table_stats.append((table, column_names, self.get_table_count(cursor, table)))
 
         # Display the statistics
         print("Database Information:")
@@ -286,13 +294,44 @@ class ChatGPTTool:
         print()
 
         print("Table Statistics:")
-        for table, count in table_stats:
+        for table, columns, count in table_stats:
             print(f"Table Name: {table}")
+            print(f"Column Names: {', '.join(columns)}")
             print(f"Number of Rows: {count}")
             print()
 
+        # print("Table Schemas:")
+        # self.print_table_schemas(conn, print_types=True)
+
         # Close the database connection
         conn.close()
+
+    def print_table_schemas(self, conn, print_types=False):
+        cursor = conn.cursor()
+
+        # Get a list of all tables in the database
+        cursor.execute("SELECT name FROM sqlite_master WHERE type='table';")
+        table_names = cursor.fetchall()
+
+        # Print the schema for each table
+        for table_name in table_names:
+            self.print_single_table_schema(cursor, table_name[0], print_types)
+
+        cursor.close()
+
+    def print_single_table_schema(self, cursor, table_name, print_types=False):
+        # Get the columns and data types for the table
+        cursor.execute(f"PRAGMA table_info({table_name});")
+        columns_info = cursor.fetchall()
+
+        print(f"Schema for table '{table_name}':")
+        for column_info in columns_info:
+            if print_types:
+                print(f"  {column_info[1]} ({column_info[2]})")
+            else:
+                print(f"  {column_info[1]}")
+
+        print()
 
     def get_table_names(self, cursor):
         cursor.execute("SELECT name FROM sqlite_master WHERE type='table';")
@@ -339,6 +378,7 @@ class ChatGPTTool:
         except sqlite3.Error as e:
             print(f"Error querying table '{table_name}': {e}")
             result = None
+            # Raise a custom exception or re-raise the exception here if needed
         finally:
             conn.close()
 
@@ -346,38 +386,12 @@ class ChatGPTTool:
 
     def query_single_value(self, table_name, condition_field, condition_value, value_field):
         results = self.query_table(table_name, condition_field, condition_value, fetch_one=True)
+        # fixme: value_field=None -> KeyError: None
         return results[value_field] if results else None
 
     def check_row_in_table(self, table_name, condition_field, condition_value):
         results = self.query_table(table_name, condition_field, condition_value, fetch_one=True)
-        return bool(results)
-
-    def print_table_schemas(self, conn, print_types=False):
-        cursor = conn.cursor()
-
-        # Get a list of all tables in the database
-        cursor.execute("SELECT name FROM sqlite_master WHERE type='table';")
-        table_names = cursor.fetchall()
-
-        # Print the schema for each table
-        for table_name in table_names:
-            self.print_single_table_schema(cursor, table_name[0], print_types)
-
-        cursor.close()
-
-    def print_single_table_schema(self, cursor, table_name, print_types=False):
-        # Get the columns and data types for the table
-        cursor.execute(f"PRAGMA table_info({table_name});")
-        columns_info = cursor.fetchall()
-
-        print(f"Schema for table '{table_name}':")
-        for column_info in columns_info:
-            if print_types:
-                print(f"  {column_info[1]} ({column_info[2]})")
-            else:
-                print(f"  {column_info[1]}")
-
-        print()
+        return bool(results) # fixme too
 
     # schema
     ###########################################################################
@@ -396,6 +410,11 @@ class ChatGPTTool:
     def record_schema_change(self, cursor, hash_value, table_name, column_names):
         cursor.execute(f"INSERT OR IGNORE INTO {self.SCHEMA_TABLE} (hash_value, table_name, column_names) VALUES (?, ?, ?)", (hash_value, table_name, ",".join(column_names)))
 
+    def calculate_column_names_hash(self, column_names):
+        # Calculate a hash of the column names (use a suitable hash function)
+        column_names = sorted(column_names) if column_names else []
+        return hashlib.md5("".join(column_names).encode()).hexdigest()
+
     def get_schema_by_hash_value(self, hash_value):
         result = self.query_table("schema", "hash_value", hash_value)
 
@@ -409,6 +428,14 @@ class ChatGPTTool:
             schema = None
 
         return schema
+
+    def get_existing_table_name(self, cursor, column_names_hash):
+        # Check if a table with the given hash exists
+        cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name = ?;", (column_names_hash,))
+        result = cursor.fetchone()
+        if result:
+            return result[0]
+        return None
 
     def infer_id_field_name(self, cursor, table_name):
         select_query = f"SELECT new_column_name FROM {self.SCHEMA_TABLE} WHERE table_name = ?"
@@ -428,19 +455,6 @@ class ChatGPTTool:
         new_column_name = old_column_name.replace(f"{table_name}s_id", "")
         new_column_name = new_column_name + "_id"
         return new_column_name
-
-    def calculate_column_names_hash(self, column_names):
-        # Calculate a hash of the column names (use a suitable hash function)
-        column_names = sorted(column_names) if column_names else []
-        return hashlib.md5("".join(column_names).encode()).hexdigest()
-
-    def get_existing_table_name(self, cursor, column_names_hash):
-        # Check if a table with the given hash exists
-        cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name = ?;", (column_names_hash,))
-        result = cursor.fetchone()
-        if result:
-            return result[0]
-        return None
 
     # print
     ###########################################################################

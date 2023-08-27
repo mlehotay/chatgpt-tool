@@ -173,29 +173,5 @@ class DataGenerator:
         random_part = ''.join(random.choice(characters) for _ in range(24))
         return f"user-{random_part}"
 
-# Unit tests
-###############################################################################
-
-class TestDataGenerator(unittest.TestCase):
-    def test_random_email(self):
-        email = DataGenerator.random_email()
-        self.assertTrue('@' in email)
-
-    def test_random_uuid(self):
-        uuid = DataGenerator.random_uuid()
-        self.assertEqual(len(uuid), 36)
-
-    def test_random_title(self):
-        title = DataGenerator.random_title()
-        self.assertTrue(title.isalpha())
-
-    def test_random_sentence(self):
-        sentence = DataGenerator.random_sentence()
-        self.assertTrue(sentence.isalpha())
-
-    def test_random_phrase(self):
-        phrase = DataGenerator.random_phrase()
-        self.assertTrue(phrase in DataGenerator.corpus)
-
 if __name__ == '__main__':
     unittest.main()

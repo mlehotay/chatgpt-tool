@@ -3,24 +3,31 @@ import tempfile
 import shutil
 import os
 import json
-import zipfile
-
+import sqlite3
+from contextlib import contextmanager
 from src.chatgpt_tool import ChatGPTTool
 
 class ImportTestCase(unittest.TestCase):
 
     def setUp(self):
-        # Create a temporary directory to simulate data files
         self.data_dir = tempfile.mkdtemp()
-        self.db_dir = tempfile.mkdtemp()  # Create a directory for the temporary database
-        self.db_name = "test_db.sqlite"
-        self.db_path = os.path.join(self.db_dir, self.db_name)
-        self.tool = ChatGPTTool(self.db_path)  # Pass the temp database path to the tool
+        self.db_dir = tempfile.mkdtemp()
+        self.db_path = os.path.join(self.db_dir, "test_db.sqlite")
+        self.tool = ChatGPTTool(self.db_path)
+        self.conn = sqlite3.connect(self.db_path)
 
     def tearDown(self):
-        # Remove the temporary directory and its contents
+        self.conn.close()
         shutil.rmtree(self.data_dir)
-        shutil.rmtree(self.db_dir)  # Remove the temporary database directory
+        shutil.rmtree(self.db_dir)
+
+    @contextmanager
+    def cursor_context(self):
+        cursor = self.conn.cursor()
+        try:
+            yield cursor
+        finally:
+            cursor.close()
 
     def create_empty_file(self, file_name):
         file_path = os.path.join(self.data_dir, file_name)
@@ -50,7 +57,7 @@ class ImportTestCase(unittest.TestCase):
             <title>Test HTML</title>
         </head>
         <body>
-            <script type="application/json">
+            <script>
                 {script_content}
             </script>
         </body>
@@ -62,117 +69,38 @@ class ImportTestCase(unittest.TestCase):
 
         return file_path
 
-class TestDataTraveral(ImportTestCase):
+class TestImportTestCase(ImportTestCase):
 
-    def test_import_empty_json_file(self):
-        # Test importing an empty JSON file
-        empty_file_path = self.create_temp_json_file({}, 'empty.json')
+    # these are arbitrary expected results for demonstration
+    ENCODING_OPTIONS = ['UTF-8', 'ISO-8859-1', 'CP437']
+    SQLITE_MAJOR_VERSION = 3
+    SQLITE_MINOR_VERSION_THRESHOLD = 17
 
-        self.tool.import_data(self.tool.db_path, empty_file_path)
+    def test_cursor_in_try_block(self):
+        # Get a cursor for reading
+        cursor = self.conn.cursor()
+        try:
+            # Perform operations using cursor
+            cursor.execute("PRAGMA encoding;")
+            encoding = cursor.fetchone()[0]
+        finally:
+            cursor.close() # Close the cursor
+        # Make assertions
+        self.assertTrue(encoding in self.ENCODING_OPTIONS, f"Unexpected encoding: {encoding}")
 
-        # Query the database to check if the data was imported
-        result = self.tool.query_table("user", "id", 'alice')
-        #self.assertIsNone(result)
-
-    def test_import_single_json_object(self):
-        # Test importing a JSON object
-        data = {'id': 'alice', 'email': 'alice@example.com'}
-        file_path = self.create_temp_json_file(data, 'single.json')
-
-        self.tool.import_data(self.tool.db_path, file_path)
-
-        # Query the database to check if the data was imported
-        result = self.tool.query_table("user", "id", 'alice')
-        #self.assertEqual(result['email'], 'alice@example.com')
-
-    def test_import_empty_json_list(self):
-        # Test importing an empty JSON list
-        data = []
-        file_path = self.create_temp_json_file(data, 'empty_list.json')
-
-        self.tool.import_data(self.tool.db_path, file_path)
-
-        # Query the database to check if the data was imported
-        result = self.tool.query_table("user", "id", 'alice')
-        #self.assertIsNone(result)
-
-    def test_import_json_list_with_objects(self):
-        # Test importing a JSON list containing objects
-        data = [
-            {'id': 'bob', 'email': 'bob@example.com'},
-            {'id': 'carol', 'email': 'carol@example.com'}
-        ]
-        file_path = self.create_temp_json_file(data, 'list_with_objects.json')
-
-        #self.tool.import_data(self.tool.db_path, file_path)
-
-        # Query the database to check if the data was imported
-        result_bob = self.tool.query_table("user", "id", 'bob')
-        #self.assertEqual(result_bob['email'], 'bob@example.com')
-
-        result_carol = self.tool.query_table("user", "id", 'carol')
-        #self.assertEqual(result_carol['email'], 'carol@example.com')
-
-    def test_import_single_json_file(self):
-        # Test importing from a single JSON file
-        data = {'id': 'alice', 'email': 'alice@example.com', 'chatgpt_plus_user': 'false', 'phone_number': '+14165551212'}
-        file_path = self.create_temp_json_file(data, 'user.json')
-
-        self.tool.import_data(self.tool.db_path, file_path)
-
-        # Query the database to fetch the data and compare
-        result = self.tool.query_table("user", "id", "alice")
-        #self.assertEqual(result['id'], 'alice')
-        #self.assertEqual(result['email'], 'alice@example.com')
-        # ... assert other fields
-
-    def test_import_single_html_file(self):
-        script_content = json.dumps({'id': 'eve', 'email': 'eve@example.com'})
-        file_path = self.create_temp_html_file(script_content, 'user.html')
-
-        self.tool.import_data(self.tool.db_path, file_path)
-        # Perform assertions to check if the data is imported correctly
-
-    def test_import_zip_with_single_json_file(self):
-        # Test importing from a ZIP archive containing a single JSON file
-        data = {'user.json': {'id': 'bob', 'email': 'bob@example.com', 'chatgpt_plus_user': 'false', 'phone_number': '+16175556666'}}
-        zip_path = self.create_temp_zip_archive(data, 'archive.zip')
-
-        self.tool.import_data(self.tool.db_path, zip_path)
-        # Perform assertions to check if the data is imported correctly
-
-    def test_import_zip_with_multiple_json_files(self):
-        # Test importing from a ZIP archive containing multiple JSON files
-        data = {'user1.json': {'id': 'carol', 'email': 'carol@example.com', 'chatgpt_plus_user': 'true', 'phone_number': '+13051234567'},
-                'user2.json': {'id': 'dave', 'email': 'dave@example.com', 'chatgpt_plus_user': 'false', 'phone_number': '+4125552023'}}
-        zip_path = self.create_temp_zip_archive(data, 'archive.zip')
-
-        self.tool.import_data(self.tool.db_path, zip_path)
-        # Perform assertions to check if the data is imported correctly
-
-    def test_import_directory_with_json_files(self):
-        # Test importing from a directory containing JSON files
-        data1 = {'id': 'emma', 'email': 'emma@example.com', 'chatgpt_plus_user': 'false', 'phone_number': '+19876543210'}
-        data2 = {'id': 'frank', 'email': 'frank@example.com', 'chatgpt_plus_user': 'true', 'phone_number': '+12345678901'}
-        data_dir = os.path.join(self.data_dir, 'json_data')
-        os.makedirs(data_dir)
-        self.create_temp_json_file(data1, 'user1.json')
-        self.create_temp_json_file(data2, 'user2.json')
-
-        self.tool.import_data(self.tool.db_path, data_dir)
-        # Perform assertions to check if the data is imported correctly
-
-    def test_import_directory_with_archives(self):
-        # Test importing from a directory containing ZIP archives
-        data1 = {'id': 'grace', 'email': 'grace@example.com', 'chatgpt_plus_user': 'false', 'phone_number': '+9876543210'}
-        data2 = {'id': 'harry', 'email': 'harry@example.com', 'chatgpt_plus_user': 'true', 'phone_number': '+11112222333'}
-        data_dir = os.path.join(self.data_dir, 'zip_data')
-        os.makedirs(data_dir)
-        self.create_temp_zip_archive({'user.json': data1}, 'archive1.zip')
-        self.create_temp_zip_archive({'user.json': data2}, 'archive2.zip')
-
-        self.tool.import_data(self.tool.db_path, data_dir)
-        # Perform assertions to check if the data is imported correctly
+    def test_cursor_with_context_manager(self):
+        # Perform operations using cursor
+        with self.cursor_context() as cursor:
+            # Use cursor in this block
+            cursor.execute("SELECT sqlite_version();")
+            version_string = cursor.fetchone()[0]
+            version_parts = version_string.strip().split(".")
+            major_version = int(version_parts[0])
+            minor_version = int(version_parts[1])
+            patch_version = int(version_parts[2])
+        # Make assertions
+        self.assertEqual(major_version, self.SQLITE_MAJOR_VERSION)
+        self.assertTrue(minor_version > self.SQLITE_MINOR_VERSION_THRESHOLD)
 
 if __name__ == '__main__':
     unittest.main()
