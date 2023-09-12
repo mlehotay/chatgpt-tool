@@ -7,6 +7,8 @@ import shutil
 import tempfile
 import string
 import hashlib
+import datetime
+import ast
 
 try:
     from gazpacho import Soup
@@ -258,16 +260,31 @@ class ChatGPTTool:
     def insert_data_list(self, cursor, table_name, json_data_list):
         for item in json_data_list:
             if item:
-                values = tuple(str(value) for value in item.values())
+                values = self.convert_values(item)
                 self.insert_data(cursor, table_name, item.keys(), values)
 
     def insert_data_single(self, cursor, table_name, json_data):
-        values = tuple(str(value) for value in json_data.values())
+        values = self.convert_values(json_data)
         self.insert_data(cursor, table_name, json_data.keys(), values)
 
     def insert_data(self, cursor, table_name, column_names, values):
         insert_query = f"INSERT OR IGNORE INTO {table_name} ({','.join(column_names)}) VALUES ({','.join(['?'] * len(values))})"
         cursor.execute(insert_query, values)
+
+    def convert_values(self, json_data):
+        converted_values = []
+        for key, value in json_data.items():
+            # value_type = type(value).__name__
+            # print(f"Value for key '{key}' has type: {value_type}")
+            if isinstance(value, (str, int, float, bool)):
+                converted_values.append(value)
+            elif isinstance(value, datetime.datetime):
+                converted_values.append(value.strftime('%Y-%m-%d %H:%M:%S'))
+            else:
+                # Handle other data types here, or convert them to strings
+                converted_values.append(str(value))
+        return converted_values
+
 
     # info
     ###########################################################################
@@ -507,32 +524,43 @@ class ChatGPTTool:
         cursor.execute(f"SELECT * FROM {self.CHAT_TABLE} WHERE id = ?", (conversation_id,))
         row = cursor.fetchone()
 
-        if row:
-            column_names = [column[0] for column in cursor.description]
-            conversation = dict(zip(column_names, row))
+        if not row:
+            print(f"Conversation not found: {conversation_id}")
+            return
 
-            print(f"Conversation ID: {conversation_id}")
-            messages = self.get_conversation_messages(conversation)
+        column_names = [column[0] for column in cursor.description]
+        conversation = dict(zip(column_names, row))
+
+        print(f"Title: {conversation['title']}")
+        print(f"id: {conversation['id']}")
+        print()
+
+        messages = self.get_conversation_messages(conversation)
+        if messages:
             for message in messages:
                 print(f"{message['author']}: {message['text']}")
             print()
-        else:
-            print(f"Conversation not found: {conversation_id}")
-
-    def get_matching_conversation_ids(self, cursor, prefix):
-        cursor.execute(f"SELECT id FROM {self.CHAT_TABLE} WHERE id LIKE ?", (f"{prefix}%",))
-        return [row[0] for row in cursor.fetchall()]
 
     def get_conversation_messages(self, conversation):
-        messages = []
-        current_node = conversation["current_node"]
-        mapping = conversation["mapping"]
+        # Check if 'mapping' key is in conversation and is not None
+        if 'mapping' not in conversation or not conversation['mapping']:
+            print("Warning: 'mapping' field is missing or empty in conversation.")
+            return
 
+        try:
+            # Safely evaluate the string as a dictionary
+            mapping = ast.literal_eval(conversation['mapping'])
+        except (SyntaxError, ValueError) as e:
+            print("Warning: Unable to extract dictionary from the string.")
+            #print(f"Exception: {e}")
+            #print(f"mapping_string: {mapping_string}")
+            return
+
+        messages = []
+        current_node = conversation['current_node']
         while current_node is not None:
             node = mapping[current_node]
-            if (
-                "message" in node
-                and node["message"]
+            if (node and "message" in node and node["message"]
                 and "content" in node["message"]
                 and node["message"]["content"]["content_type"] == "text"
                 and "parts" in node["message"]["content"]
@@ -547,6 +575,10 @@ class ChatGPTTool:
             current_node = node["parent"]
 
         return messages[::-1]
+
+    def get_matching_conversation_ids(self, cursor, prefix):
+        cursor.execute(f"SELECT id FROM {self.CHAT_TABLE} WHERE id LIKE ?", (f"{prefix}%",))
+        return [row[0] for row in cursor.fetchall()]
 
     def truncate_string(self, string, max_length):
         if len(string) <= max_length:
