@@ -4,7 +4,6 @@ import shutil
 import os
 from .data_generator import DataGenerator
 
-
 class TestDataGenerationAndImport(unittest.TestCase):
 
     # setUp & tearDown

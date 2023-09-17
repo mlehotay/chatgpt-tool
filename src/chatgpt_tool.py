@@ -9,6 +9,7 @@ import string
 import hashlib
 import datetime
 import ast
+import re
 
 try:
     from gazpacho import Soup
@@ -100,22 +101,20 @@ class ChatGPTTool:
                     self.traverse_files(file_path, process_function, *args)
         elif path.endswith(".zip"):
             if self.verbose:
-                print(f"Importing archive '{path}'")
+                print(f"Reading archive '{path}'")
             with tempfile.TemporaryDirectory() as temp_dir:
                 with zipfile.ZipFile(path, "r") as zip_file:
                     for name in zip_file.namelist():
                         extracted_file_path = zip_file.extract(name, path=temp_dir)
                         self.traverse_files(extracted_file_path, process_function, *args)
         else:
-            _, file_extension = os.path.splitext(path)
-            if file_extension.lower() in (".json", ".html"):
-                self.process_file(path, process_function, *args)
+            self.process_file(path, process_function, *args)
 
     def process_file(self, path, process_function, *args):
         _, file_extension = os.path.splitext(path)
 
         if self.verbose:
-            print(f"Importing file '{path}'")
+            print(f"Reading file '{path}'")
 
         if os.path.getsize(path) == 0:
             print(f"Warning: Skipping empty file '{path}'")
@@ -124,16 +123,13 @@ class ChatGPTTool:
                 json_data = json.load(file)
                 process_function(*args, json_data, path)
         elif file_extension.lower() == ".html":
-            if process_html:
-                with open(path) as file:
-                    html_content = file.read()
-                    json_data = self.extract_json_from_html(html_content)
-                    if json_data:
-                        process_function(*args, json_data, path)
-                    else:
-                        print("Warning: No JSON data found in the HTML file.")
-            else:
-                print("Warning: Parser not available. Skipping HTML file.")
+            with open(path) as file:
+                html_content = file.read()
+                json_data = self.extract_json_from_html(html_content)
+                if json_data:
+                    process_function(*args, json_data, path)
+                else:
+                    print("Warning: No JSON data found in the HTML file.")
         else:
             print("Warning: Unexpected file format.")
 
@@ -166,6 +162,25 @@ class ChatGPTTool:
 
         return versioned_table_name, hash_value
 
+    # https://docs.python.org/3/library/json.html
+    # https://docs.python.org/3/library/json.html#module-json.tool
+
+    # class json.JSONDecoder(*, object_hook=None, parse_float=None, parse_int=None, parse_constant=None, strict=True, object_pairs_hook=None)
+
+    # If strict is false (True is the default), then control characters will be
+    # allowed inside strings. Control characters in this context are those with
+    # character codes in the 0–31 range, including '\t' (tab), '\n', '\r' and
+    # '\0'.
+
+    # raw_decode(s)
+
+    # Decode a JSON document from s (a str beginning with a JSON document) and
+    # return a 2-tuple of the Python representation and the index in s where the
+    # document ended.
+
+    # This can be used to decode a JSON document from a string that may have
+    # extraneous data at the end.
+
     def extract_json_from_html(self, html_content):
         # Parse the HTML content using Gazpacho
         soup = Soup(html_content)
@@ -187,12 +202,46 @@ class ChatGPTTool:
                     # Convert JSON string to Python object (list of dicts)
                     json_data = json.loads(json_string)
                     break
-                except (json.JSONDecodeError, ValueError, IndexError):
+                except (json.JSONDecodeError, ValueError, IndexError) as e:
                     print("Warning: Unable to extract JSON objects from jsonData variable.")
+                    print("Error:", e)
+                    print(self.truncate_string(json_string, self.get_truncation_length()))
                     return None
 
         if json_data is not None:
             return json_data
+
+        print("Warning: No <script> tag containing jsonData variable found.")
+        return []
+
+    def extract_json_from_html_re(self, html_content):
+        # Use regular expression to find all <script> tags
+        script_tags = re.findall(r'<script[^>]*>(.*?)</script>', html_content, re.DOTALL)
+
+        # List to store extracted JSON data
+        json_data_list = []
+
+        # Search for <script> tags containing jsonData variable assignment
+        for script_tag in script_tags:
+            # Use regular expressions to extract JSON content
+            json_matches = re.findall(r'jsonData\s*=\s*\[.*?\];', script_tag, re.DOTALL)
+            for json_match in json_matches:
+                try:
+                    # Extract JSON-like content
+                    json_string = json_match.split('=')[1].strip()
+                    # Clean the content by removing JavaScript code
+                    json_string = re.sub(r'(function[^}]+})', '', json_string)
+                    # Attempt to parse the cleaned JSON-like content
+                    json_data = ast.literal_eval(json_string)
+                    json_data_list.append(json_data)
+                except (ValueError, SyntaxError) as e:
+                    print("Warning: Unable to extract JSON objects from HTML file.")
+                    print("Error:", e)
+                    print("Problematic Content:")
+                    print(json_match)  # Print the problematic content
+
+        if json_data_list:
+            return json_data_list
 
         print("Warning: No <script> tag containing jsonData variable found.")
         return []
@@ -216,11 +265,6 @@ class ChatGPTTool:
 
     def import_single_json_object(self, cursor, table_name, json_object):
         id_field_name, column_names = self.get_id_and_column_names(json_object)
-        if not id_field_name:
-            if self.verbose: # fixme: not all tables have keys, need to stop requiring this
-                print(f"Skipping object in table: {table_name} (no 'id' field found) {json_object}")
-            return
-
         try:
             cursor.execute("BEGIN")
             table_name, hash_value = self.get_versioned_table_name(cursor, table_name, column_names)
@@ -237,22 +281,28 @@ class ChatGPTTool:
 
     def get_id_and_column_names(self, json_data):
         if isinstance(json_data, list):
-            first_object = json_data[0]
+            first_object = json_data[0] if json_data else {}
         else:
             first_object = json_data
 
         id_field_name = next((key for key in first_object.keys() if key.lower() == "id"), None)
-        if not id_field_name:
-            return None, None
-
         column_names = list(first_object.keys())
         return id_field_name, column_names
 
     def create_table(self, cursor, table_name, id_field_name, column_names):
-        create_table_query = f"CREATE TABLE IF NOT EXISTS {table_name} ({id_field_name} TEXT PRIMARY KEY,"
+        create_table_query = f"CREATE TABLE IF NOT EXISTS {table_name} ("
+
+        if id_field_name:
+            create_table_query += f"{id_field_name} TEXT PRIMARY KEY,"
+
         for column_name in column_names:
-            if column_name.lower() != id_field_name.lower():
+            if not id_field_name or id_field_name and id_field_name.lower() != column_name.lower():
                 create_table_query += f"{column_name} TEXT,"
+
+        if not id_field_name:
+            # Define a compound primary key if there's no id field
+            create_table_query += f"PRIMARY KEY ({','.join(column_names)})"
+
         create_table_query = create_table_query.rstrip(',')
         create_table_query += ")"
         cursor.execute(create_table_query)
@@ -402,13 +452,15 @@ class ChatGPTTool:
         return result
 
     def query_single_value(self, table_name, condition_field, condition_value, value_field):
-        results = self.query_table(table_name, condition_field, condition_value, fetch_one=True)
-        # fixme: value_field=None -> KeyError: None
-        return results[value_field] if results else None
+        result = self.query_table(table_name, condition_field, condition_value, fetch_one=True)
+        if result:
+            return result.get(value_field, None)
+        else:
+            return None
 
     def check_row_in_table(self, table_name, condition_field, condition_value):
-        results = self.query_table(table_name, condition_field, condition_value, fetch_one=True)
-        return bool(results) # fixme too
+        result = self.query_table(table_name, condition_field, condition_value, fetch_one=True)
+        return result is not None
 
     # schema
     ###########################################################################
@@ -551,9 +603,9 @@ class ChatGPTTool:
             # Safely evaluate the string as a dictionary
             mapping = ast.literal_eval(conversation['mapping'])
         except (SyntaxError, ValueError) as e:
-            print("Warning: Unable to extract dictionary from the string.")
-            #print(f"Exception: {e}")
-            #print(f"mapping_string: {mapping_string}")
+            print("Warning: Unable to extract conversation mapping.")
+            if self.verbose:
+                print(e)
             return
 
         messages = []

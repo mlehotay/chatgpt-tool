@@ -51,18 +51,21 @@ class ImportTestCase(unittest.TestCase):
         return zip_path
 
     def create_temp_html_file(self, script_content, file_name):
-        html_content = f"""
-        <html>
-        <head>
-            <title>Test HTML</title>
-        </head>
-        <body>
-            <script>
-                {script_content}
-            </script>
-        </body>
-        </html>
-        """
+        html_tags = [
+            "<html>",
+            "<head>",
+            "<title>Test HTML</title>",
+            "</head>",
+            "<body>",
+            "<script>",
+            script_content,
+            "</script>",
+            "</body>",
+            "</html>"
+        ]
+
+        html_content = "\n".join(html_tags)
+
         file_path = os.path.join(self.data_dir, file_name)
         with open(file_path, 'w') as f:
             f.write(html_content)

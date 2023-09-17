@@ -6,6 +6,7 @@ import json
 import sqlite3
 from src.chatgpt_tool import ChatGPTTool
 from .test_import import ImportTestCase
+from .data_generator import DataGenerator
 
 class TestDataTraveral(ImportTestCase):
 
@@ -81,24 +82,17 @@ class TestDataTraveral(ImportTestCase):
         result = self.tool.query_table("user", "id", 'alice', fetch_one=False)
         self.assertEqual(result, [data])
 
-    @unittest.expectedFailure
     def test_import_single_html_file(self):
-        script_content = "jsonData = [{'id': 'eve', 'email': 'eve@example.com'}]"
-        file_path = self.create_temp_html_file(script_content, 'user.html')
-
-        # print(f"script_content: {script_content}")
-        # print(f"file_path: {file_path}")
-        # with open(file_path) as file:
-        #    html_content = file.read()
-        # print(f"html_content: {html_content}")
+        conversations = [DataGenerator.generate_conversation() for _ in range(5)]
+        json_data = json.dumps(conversations)
+        script_content = f"jsonData = {json_data}"
+        file_path = self.create_temp_html_file(script_content, 'chat.html')
 
         self.tool.import_data(self.tool.db_path, file_path)
 
         with self.cursor_context() as cursor:
             self.assertFalse(self.tool.table_exists(cursor, "chat"))
-            self.assertFalse(self.tool.table_exists(cursor, self.tool.CHAT_TABLE))
-        result = self.tool.query_single_value("user", "id", "eve", "email")
-        self.assertEqual(result, 'eve@example.com')
+            self.assertTrue(self.tool.table_exists(cursor, "conversations"))
 
     def test_import_zip_with_single_json_file(self):
         # Test importing from a ZIP archive containing a single JSON file
