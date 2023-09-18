@@ -1,0 +1,50 @@
+test_help_command (tests.test_cli.CLITestCase) ... ok
+test_import_command (tests.test_cli.CLITestCase) ... ok
+test_cursor_in_try_block (tests.test_import.TestImportTestCase) ... ok
+test_cursor_with_context_manager (tests.test_import.TestImportTestCase) ... ok
+test_random_email (tests.test_utils.TestDataGenerator) ... ok
+test_random_phrase (tests.test_utils.TestDataGenerator) ... ok
+test_random_sentence (tests.test_utils.TestDataGenerator) ... ok
+test_random_title (tests.test_utils.TestDataGenerator) ... ok
+test_random_uuid (tests.test_utils.TestDataGenerator) ... ok
+test_import_with_mapped_table (tests.test_schema.TestSchemaHandling) ... ok
+test_import_with_matching_schema (tests.test_schema.TestSchemaHandling) ... ok
+test_import_with_new_schema (tests.test_schema.TestSchemaHandling) ... ok
+test_known_schema_with_expected_filename (tests.test_schema.TestSchemaHandling) ... ok
+test_known_schema_with_familiar_unexpected_filename (tests.test_schema.TestSchemaHandling) ... ok
+test_known_schema_with_mapped_filename (tests.test_schema.TestSchemaHandling) ... ok
+test_known_schema_with_novel_unexpected_filename (tests.test_schema.TestSchemaHandling) ... ok
+test_schema_cache (tests.test_schema.TestSchemaHandling) ... ok
+test_import_chat (tests.test_data_structure.TestDataGenerationAndImport) ... ok
+test_import_conversations (tests.test_data_structure.TestDataGenerationAndImport) ... ok
+test_import_message_feedback (tests.test_data_structure.TestDataGenerationAndImport) ... ok
+test_import_model_comparisons (tests.test_data_structure.TestDataGenerationAndImport) ... ok
+test_import_shared_conversations (tests.test_data_structure.TestDataGenerationAndImport) ... ok
+test_import_user (tests.test_data_structure.TestDataGenerationAndImport) ... ok
+test_import_directory_with_archives (tests.test_path_traversal.TestDataTraveral) ... ok
+test_import_directory_with_json_files (tests.test_path_traversal.TestDataTraveral) ... ok
+test_import_empty_json_file (tests.test_path_traversal.TestDataTraveral) ... ok
+test_import_empty_json_list (tests.test_path_traversal.TestDataTraveral) ... ok
+test_import_json_list_with_objects (tests.test_path_traversal.TestDataTraveral) ... ok
+test_import_single_html_file (tests.test_path_traversal.TestDataTraveral) ... ok
+test_import_single_json_file (tests.test_path_traversal.TestDataTraveral) ... ok
+test_import_single_json_object (tests.test_path_traversal.TestDataTraveral) ... ok
+test_import_zip_with_multiple_json_files (tests.test_path_traversal.TestDataTraveral) ... ok
+test_import_zip_with_single_json_file (tests.test_path_traversal.TestDataTraveral) ... ok
+
+----------------------------------------------------------------------
+Ran 33 tests in 1.254s
+
+OK
+
+Test Result Summary
+-------------------
+Date: 2023-09-18 15:18:37
+Commit: a464308
+Branch: main
+Modified: Yes
+
+Tests Passed: 33
+Tests Failed: 0
+Tests Skipped: 0
+Total Tests: 33

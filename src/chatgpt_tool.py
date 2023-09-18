@@ -43,10 +43,13 @@ class ChatGPTTool:
     ###########################################################################
 
     def __init__(self, db_path=None):
-        self.verbose = False
+        self.verbose = False  # Initialize verbose as False by default
         self.db_path = db_path or self.DB_NAME
         self.schema_cache = {}  # Initialize the cache dictionary
         self.parser = argparse.ArgumentParser(prog="chatgpt_tool", description="ChatGPT Tool")
+        self.args = None # will be assigned after parsing
+
+        self.parser.add_argument('-v', '--verbose', action='store_true', help='Enable verbose mode')
 
         subparsers = self.parser.add_subparsers(title="subcommands", dest="subcommand")
 
@@ -80,6 +83,9 @@ class ChatGPTTool:
         # Subcommand: inspect
         inspect_parser = subparsers.add_parser("inspect", help="Inspect data files")
         inspect_parser.add_argument("path", nargs="?", default=self.DATA_PATH, help="Data directory for inspection")
+
+        self.args = self.parser.parse_args()
+        self.verbose = self.args.verbose
 
     # import
     ###########################################################################
@@ -131,7 +137,7 @@ class ChatGPTTool:
                 else:
                     print("Warning: No JSON data found in the HTML file.")
         else:
-            print("Warning: Unexpected file format.")
+            print(f"Warning: Unexpected file format '{path}'")
 
     def get_table_name(self, file_path):
         base_filename = os.path.basename(file_path)
@@ -247,12 +253,12 @@ class ChatGPTTool:
         return []
 
     def import_json_data_to_sqlite(self, conn, json_data, path):
-        if not isinstance(json_data, list):
-            json_data = [json_data]  # Convert single object to a list with a single element
         if not json_data:
             if self.verbose:
                 print(f"Skipping import for file: {path} (empty JSON data)")
             return
+        elif not isinstance(json_data, list):
+            json_data = [json_data]  # Convert single object to a list with a single element
 
         cursor = conn.cursor()
         table_name = self.get_table_name(path)
@@ -305,6 +311,9 @@ class ChatGPTTool:
 
         create_table_query = create_table_query.rstrip(',')
         create_table_query += ")"
+
+        if self.verbose:
+            print(f"Creating table '{table_name}': {id_field_name}, {column_names}")
         cursor.execute(create_table_query)
 
     def insert_data_list(self, cursor, table_name, json_data_list):
@@ -471,7 +480,7 @@ class ChatGPTTool:
 
     def create_schema_table(self, cursor):
         create_table_query = f"CREATE TABLE IF NOT EXISTS {self.SCHEMA_TABLE} ("
-        create_table_query += "hash_value TEXT PRIMARY KEY,"
+        create_table_query += "hash_value TEXT,"
         create_table_query += "table_name TEXT,"
         create_table_query += "column_names TEXT)"
         cursor.execute(create_table_query)
@@ -818,36 +827,34 @@ class ChatGPTTool:
     ###########################################################################
 
     def run(self):
-        args = self.parser.parse_args()
-
-        if args.subcommand == "import":
+        if self.args.subcommand == "import":
             print("Action: Import")
-            self.import_data(args.db_name, args.path)
-        elif args.subcommand == "show":
+            self.import_data(self.args.db_name, self.args.path)
+        elif self.args.subcommand == "show":
             print("Action: Display database tables")
-            self.print_tables(args.db_name)
-        elif args.subcommand == "info":
+            self.print_tables(self.args.db_name)
+        elif self.args.subcommand == "info":
             print("Action: Display database information")
-            self.info(args.db_name)
-        elif args.subcommand == "export":
-            if args.text:
+            self.info(self.args.db_name)
+        elif self.args.subcommand == "export":
+            if self.args.text:
                 print("Action: Export conversations as plain text")
-                self.export_conversations_as_text(args.db_name, args.path, args.prefix)
-            elif args.html:
+                self.export_conversations_as_text(self.args.db_name, self.args.path, self.args.prefix)
+            elif self.args.html:
                 print("Action: Export conversations as HTML")
-                self.export_conversations_as_html(args.db_name, args.path, args.prefix)
+                self.export_conversations_as_html(self.args.db_name, self.args.path, self.args.prefix)
             else:
                 print("Action: Export entire database as JSON")
-                self.export_database_as_json(args.db_name, args.path)
-        elif args.subcommand == "print":
+                self.export_database_as_json(self.args.db_name, self.args.path)
+        elif self.args.subcommand == "print":
             print("Action: Print conversation")
-            if args.prefix:
-                self.print_conversation(args.db_name, args.prefix)
+            if self.args.prefix:
+                self.print_conversation(self.args.db_name, self.args.prefix)
             else:
                 print("Error: 'print' subcommand requires the 'prefix' argument.")
-        elif args.subcommand == "inspect":
+        elif self.args.subcommand == "inspect":
             print("Action: Inspect data files")
-            self.inspect_data(args.path)
+            self.inspect_data(self.args.path)
         else:
             self.parser.print_help()
 

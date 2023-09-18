@@ -22,7 +22,8 @@ class TestDataTraveral(ImportTestCase):
 
     def test_import_empty_json_file(self):
         # Test importing an empty JSON file
-        empty_file_path = self.create_temp_json_file({}, 'empty.json')
+        data = {}
+        empty_file_path = self.create_temp_json_file(data, 'empty.json')
 
         # The database should be empty now, with only the schema table present
 

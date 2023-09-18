@@ -52,7 +52,7 @@ class TestSchemaHandling(ImportTestCase):
 
         # Check that schema was added with filename as the tablename
         # fixme: not sure what the desired behaviour is here.
-        # self.assertTrue(self.tool.check_row_in_table("schema", "table_name", basename))
+        self.assertTrue(self.tool.check_row_in_table("schema", "table_name", basename))
 
         # Check that data was added to correct table
         result = self.tool.query_table(basename, "id", data2["id"], fetch_one=True)
