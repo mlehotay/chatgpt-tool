@@ -1,15 +1,15 @@
 import argparse
+import ast
+import hashlib
 import json
 import os
-import sqlite3
-import zipfile
 import shutil
-import tempfile
+import sqlite3
 import string
-import hashlib
-import datetime
-import ast
-import re
+import sys
+import tempfile
+import zipfile
+from datetime import datetime
 
 try:
     from gazpacho import Soup
@@ -36,6 +36,9 @@ class ChatGPTTool:
         # Add more mappings if needed
     }
 
+    DISPLAY_STYLES = ['default', 'irc', 'full', 'raw']
+    TIME_STRF = "%Y-%m-%d %H:%M:%S"
+
     # init
     ###########################################################################
     # This section contains the setup for the command-line interface (CLI) and
@@ -43,42 +46,40 @@ class ChatGPTTool:
     ###########################################################################
 
     def __init__(self, db_path=None):
-        self.verbose = False  # Initialize verbose as False by default
+        self.verbose = False
         self.db_path = db_path or self.DB_NAME
         self.schema_cache = {}  # Initialize the cache dictionary
-        self.parser = argparse.ArgumentParser(prog="chatgpt_tool", description="ChatGPT Tool")
         self.args = None # will be assigned after parsing
 
+        # Create the top-level parser
+        self.parser = argparse.ArgumentParser(prog="chatgpt_tool", description="ChatGPT Tool")
         self.parser.add_argument('-v', '--verbose', action='store_true', help='Enable verbose mode')
+        self.parser.add_argument("-db", "--db-name", dest="db_name", default=self.db_path, help="Name of the SQLite database (default: chatgpt.db)")
 
+        # Create subparsers
         subparsers = self.parser.add_subparsers(title="subcommands", dest="subcommand")
 
         # Subcommand: import
         import_parser = subparsers.add_parser("import", help="Import JSON data into the SQLite database")
         import_parser.add_argument("path", help="Filepath or directory for import")
-        import_parser.add_argument("-db", "--db-name", dest="db_name", default=self.db_path, help="Name of the SQLite database (default: chatgpt.db)")
 
         # Subcommand: show
         show_parser = subparsers.add_parser("show", help="Display database tables")
-        show_parser.add_argument("-db", "--db-name", dest="db_name", default=self.db_path, help="Name of the SQLite database (default: chatgpt.db)")
 
         # Subcommand: info
         info_parser = subparsers.add_parser("info", help="Display database information")
-        info_parser.add_argument("-db", "--db-name", dest="db_name", default=self.db_path, help="Name of the SQLite database (default: chatgpt.db)")
 
         # Subcommand: export
         export_parser = subparsers.add_parser("export", help="Export conversations from the SQLite database")
         export_parser.add_argument("path", help="Output directory for export")
-        export_parser.add_argument("-db", "--db-name", dest="db_name", default=self.db_path, help="Name of the SQLite database (default: chatgpt.db)")
-        export_parser.add_argument("-html", action="store_true", help="Export conversations as HTML files")
-        export_parser.add_argument("-text", action="store_true", help="Export conversations as plain text files")
-        export_parser.add_argument("-json", action="store_true", help="Export conversations as JSON files (default)")
-        export_parser.add_argument("-prefix", dest="prefix", help="Export conversations with IDs starting with the specified prefix")
+        export_parser.add_argument("-style", choices=self.DISPLAY_STYLES, default='default', help="Choose a display style (default, alternative)")
+        export_parser.add_argument("-format", choices=['text', 'html', 'json'], default='json', help="Choose an output format (text, html, json)")
+        export_parser.add_argument("prefixes", nargs="*", help="Export conversations with IDs starting with the specified prefix")
 
         # Subcommand: print
         print_parser = subparsers.add_parser("print", help="Print conversation")
-        print_parser.add_argument("prefix", help="Conversation ID prefix to find and print.")
-        print_parser.add_argument("-db", "--db-name", dest="db_name", default=self.db_path, help="Name of the SQLite database (default: chatgpt.db)")
+        print_parser.add_argument("prefixes", nargs="*", help="Print conversations with IDs starting with the specified prefix")
+        print_parser.add_argument("-style", choices=self.DISPLAY_STYLES, default='default', help="Choose a display style (default, alternative)")
 
         # Subcommand: inspect
         inspect_parser = subparsers.add_parser("inspect", help="Inspect data files")
@@ -86,6 +87,7 @@ class ChatGPTTool:
 
         self.args = self.parser.parse_args()
         self.verbose = self.args.verbose
+        self.db_path = self.args.db_name  # Update self.db_path based on parsed args
 
     # import
     ###########################################################################
@@ -406,7 +408,6 @@ class ChatGPTTool:
                 print(f"  {column_info[1]} ({column_info[2]})")
             else:
                 print(f"  {column_info[1]}")
-
         print()
 
     def get_table_names(self, cursor):
@@ -489,7 +490,7 @@ class ChatGPTTool:
         cursor.execute(f"INSERT OR IGNORE INTO {self.SCHEMA_TABLE} (hash_value, table_name, column_names) VALUES (?, ?, ?)", (hash_value, table_name, ",".join(column_names)))
 
     def calculate_column_names_hash(self, column_names):
-        # Calculate a hash of the column names (use a suitable hash function)
+        # Calculate a hash of the column names
         column_names = sorted(column_names) if column_names else []
         return hashlib.md5("".join(column_names).encode()).hexdigest()
 
@@ -567,7 +568,16 @@ class ChatGPTTool:
 
         conn.close()
 
-    def print_conversation(self, db_name, prefix):
+    def truncate_string(self, string, max_length):
+        if len(string) <= max_length:
+            return string
+        return string[:max_length-3] + "..."
+
+    def get_truncation_length(self):
+        terminal_size = shutil.get_terminal_size(fallback=(80, 24))
+        return terminal_size.columns - 3  # Subtract 3 to account for ellipsis
+
+    def print_conversation(self, db_name, prefix, style='default'):
         conn = sqlite3.connect(db_name)
         cursor = conn.cursor()
 
@@ -575,13 +585,18 @@ class ChatGPTTool:
 
         if conversation_ids:
             for conversation_id in conversation_ids:
-                self.print_single_conversation(cursor, conversation_id)
+                self.print_single_conversation(cursor, conversation_id, style)
         else:
             print(f"No conversations found with prefix: {prefix}")
 
         conn.close()
 
-    def print_single_conversation(self, cursor, conversation_id):
+    def get_matching_conversation_ids(self, cursor, prefix):
+        cursor.execute(f"SELECT id FROM {self.CHAT_TABLE} WHERE id LIKE ?", (f"{prefix}%",))
+        return [row[0] for row in cursor.fetchall()]
+
+
+    def print_single_conversation(self, cursor, conversation_id, style):
         cursor.execute(f"SELECT * FROM {self.CHAT_TABLE} WHERE id = ?", (conversation_id,))
         row = cursor.fetchone()
 
@@ -592,63 +607,96 @@ class ChatGPTTool:
         column_names = [column[0] for column in cursor.description]
         conversation = dict(zip(column_names, row))
 
-        print(f"Title: {conversation['title']}")
-        print(f"id: {conversation['id']}")
-        print()
+        if style == 'irc':
+            self.print_irc_style(conversation)
+        elif style == 'raw':
+            self.print_raw_style(conversation)
+        elif style == 'full':
+            self.print_full_style(conversation)
+        else:
+            self.print_default_style(conversation)
 
+    def print_default_style(self, conversation):
+        # Print conversation header
+        print(f"\nTitle: {conversation['title']}")
+        print(f"ID: {conversation['id']}\n")
+
+        # Print messages
         messages = self.get_conversation_messages(conversation)
         if messages:
             for message in messages:
-                print(f"{message['author']}: {message['text']}")
-            print()
+                author = str(message['author'])
+                if author == "assistant":
+                    author = "ChatGPT"
+                if author != "system":
+                    text = message['text']
+                    print(f"{author}: {text}\n")
+
+    def print_irc_style(self, conversation):
+        # Print conversation header
+        print(f"\nTitle: {conversation['title']}")
+        print(f"ID: {conversation['id']}")
+        print(f"Created: {datetime.fromtimestamp(float(conversation['create_time'])).strftime(self.TIME_STRF)}")
+        print(f"Updated: {datetime.fromtimestamp(float(conversation['update_time'])).strftime(self.TIME_STRF)}\n")
+
+        # Print messages in IRC style
+        messages = self.get_conversation_messages(conversation)
+        if messages:
+            for message in messages:
+                timestamp = message['timestamp'] or 0
+                timestamp = datetime.fromtimestamp(float(timestamp)).strftime(self.TIME_STRF)
+                author = str(message['author'])
+                text = message['text']
+                print(f"{timestamp} <{author}> {text}\n")
+
+    def print_raw_style(self, conversation):
+        # Print all information in the conversation object
+        for key, value in conversation.items():
+            print(f"{key}: {value}")
+
+    def print_full_style(self, conversation):
+        # Print individual messages in 'full' style
+        messages = self.get_conversation_messages(conversation)
+        if messages:
+            for message in messages:
+                author = str(message['author'])
+                timestamp = message['timestamp'] or 0
+                if timestamp is not None:
+                    timestamp = datetime.fromtimestamp(float(timestamp)).strftime(self.TIME_STRF)
+                text = message['text']
+                print(f"{timestamp} <{author}> {text}\n")
 
     def get_conversation_messages(self, conversation):
         # Check if 'mapping' key is in conversation and is not None
         if 'mapping' not in conversation or not conversation['mapping']:
             print("Warning: 'mapping' field is missing or empty in conversation.")
-            return
+            return []
 
         try:
             # Safely evaluate the string as a dictionary
             mapping = ast.literal_eval(conversation['mapping'])
-        except (SyntaxError, ValueError) as e:
+        except (json.JSONDecodeError, SyntaxError, ValueError, IndexError) as e:
             print("Warning: Unable to extract conversation mapping.")
             if self.verbose:
                 print(e)
-            return
+            return []
 
         messages = []
         current_node = conversation['current_node']
         while current_node is not None:
             node = mapping[current_node]
-            if (node and "message" in node and node["message"]
-                and "content" in node["message"]
-                and node["message"]["content"]["content_type"] == "text"
-                and "parts" in node["message"]["content"]
-                and node["message"]["content"]["parts"]
-                and len(node["message"]["content"]["parts"][0]) > 0
-                and node["message"]["author"]["role"] != "system"
-            ):
-                author = node["message"]["author"]["role"]
-                if author == "assistant":
-                    author = "ChatGPT"
-                messages.append({"author": author, "text": node["message"]["content"]["parts"][0]})
+            if "message" in node and node["message"]:
+                message = node["message"]
+                if "author" in message and "content" in message:
+                    author = message["author"]["role"]
+                    timestamp = message.get("create_time", "")
+                    content = message["content"]
+                    if "content_type" in content and content["content_type"] == "text" and "parts" in content:
+                        text = content["parts"][0]
+                        messages.append({"author": author, "timestamp": timestamp, "text": text})
             current_node = node["parent"]
 
         return messages[::-1]
-
-    def get_matching_conversation_ids(self, cursor, prefix):
-        cursor.execute(f"SELECT id FROM {self.CHAT_TABLE} WHERE id LIKE ?", (f"{prefix}%",))
-        return [row[0] for row in cursor.fetchall()]
-
-    def truncate_string(self, string, max_length):
-        if len(string) <= max_length:
-            return string
-        return string[:max_length-3] + "..."
-
-    def get_truncation_length(self):
-        terminal_size = shutil.get_terminal_size(fallback=(80, 24))
-        return terminal_size.columns - 3  # Subtract 3 to account for ellipsis
 
     # export
     ###########################################################################
@@ -657,7 +705,9 @@ class ChatGPTTool:
     # `export_conversation_plain_text`, and others fit in this section.
     ###########################################################################
 
-    def export_conversations(self, db_name, output_directory=None, export_format="html", prefix=None):
+    def export_conversations(self, db_name, output_directory=None, export_format="json", prefixes=None, display_style='default'):
+        # Your existing code for exporting conversations
+        # Modify the output format based on the 'export_format' and 'display_style' parameters
         output_directory = output_directory or self.EXPORT_PATH
 
         if not os.path.exists(output_directory):
@@ -788,6 +838,14 @@ class ChatGPTTool:
 
         conn.close()
 
+    def generate_markdown_output(self, db_name):
+        # Generate and return Markdown output here
+        pass
+
+    def generate_html_output(self, db_name):
+        # Generate and return HTML output here
+        pass
+
     # inspect
     ###########################################################################
     # Functions for inspecting data and JSON formats should be placed here.
@@ -837,21 +895,16 @@ class ChatGPTTool:
             print("Action: Display database information")
             self.info(self.args.db_name)
         elif self.args.subcommand == "export":
-            if self.args.text:
-                print("Action: Export conversations as plain text")
-                self.export_conversations_as_text(self.args.db_name, self.args.path, self.args.prefix)
-            elif self.args.html:
-                print("Action: Export conversations as HTML")
-                self.export_conversations_as_html(self.args.db_name, self.args.path, self.args.prefix)
-            else:
-                print("Action: Export entire database as JSON")
-                self.export_database_as_json(self.args.db_name, self.args.path)
+            print(f"Action: Export conversations in {self.args.export_format} format")
+            self.export_conversations(self.args.db_name, self.args.path, self.args.format, self.args.prefixes, self.args.style)
         elif self.args.subcommand == "print":
             print("Action: Print conversation")
-            if self.args.prefix:
-                self.print_conversation(self.args.db_name, self.args.prefix)
+            if self.args.prefixes:
+                for prefix in self.args.prefixes:
+                    self.print_conversation(self.args.db_name, prefix, self.args.style)
             else:
-                print("Error: 'print' subcommand requires the 'prefix' argument.")
+                print("Error: Please specify one or more conversations to print.")
+                sys.exit(1)
         elif self.args.subcommand == "inspect":
             print("Action: Inspect data files")
             self.inspect_data(self.args.path)

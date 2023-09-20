@@ -26,7 +26,7 @@ def get_test_classes(module):
 def get_git_version():
     version, branch, modified = ("unknown",) * 3
     try:
-        version = subprocess.check_output(['git', 'rev-parse', '--short=7', 'HEAD']).decode().strip()[:7]
+        version = subprocess.check_output(['git', 'rev-parse', 'HEAD']).decode().strip()
         branch = subprocess.check_output(['git', 'rev-parse', '--abbrev-ref', 'HEAD']).decode().strip()
         status = subprocess.check_output(['git', 'status', '--porcelain']).decode().strip()
         modified = "Yes" if status else "No"
@@ -75,6 +75,6 @@ if __name__ == "__main__":
     # To write output to a file, pass the file object as an argument
     # e.g., output_file = open("test_output.log", "w")
     # To print output to the console, pass None as an argument
-    # output_file = None
-    output_file = open("docs/results.txt", "w")
+    output_file = None
+    # output_file = open("docs/results.txt", "w")
     main(output_file)
