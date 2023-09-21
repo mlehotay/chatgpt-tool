@@ -36,9 +36,6 @@ class ChatGPTTool:
         # Add more mappings if needed
     }
 
-    DISPLAY_STYLES = ['default', 'irc', 'full', 'raw']
-    TIME_STRF = "%Y-%m-%d %H:%M:%S"
-
     # init
     ###########################################################################
     # This section contains the setup for the command-line interface (CLI) and
@@ -72,14 +69,14 @@ class ChatGPTTool:
         # Subcommand: export
         export_parser = subparsers.add_parser("export", help="Export conversations from the SQLite database")
         export_parser.add_argument("path", help="Output directory for export")
-        export_parser.add_argument("-style", choices=self.DISPLAY_STYLES, default='default', help="Choose a display style (default, alternative)")
+        export_parser.add_argument("-style", choices=self.DISPLAY_STYLES.keys(), default='default', help="Choose a display style (default, alternative)")
         export_parser.add_argument("-format", choices=['text', 'html', 'json'], default='json', help="Choose an output format (text, html, json)")
         export_parser.add_argument("prefixes", nargs="*", help="Export conversations with IDs starting with the specified prefix")
 
         # Subcommand: print
         print_parser = subparsers.add_parser("print", help="Print conversation")
         print_parser.add_argument("prefixes", nargs="*", help="Print conversations with IDs starting with the specified prefix")
-        print_parser.add_argument("-style", choices=self.DISPLAY_STYLES, default='default', help="Choose a display style (default, alternative)")
+        print_parser.add_argument("-style", choices=self.DISPLAY_STYLES.keys(), default='default', help="Choose a display style (default, alternative)")
 
         # Subcommand: inspect
         inspect_parser = subparsers.add_parser("inspect", help="Inspect data files")
@@ -339,7 +336,7 @@ class ChatGPTTool:
             # print(f"Value for key '{key}' has type: {value_type}")
             if isinstance(value, (str, int, float, bool)):
                 converted_values.append(value)
-            elif isinstance(value, datetime.datetime):
+            elif isinstance(value, datetime):
                 converted_values.append(value.strftime('%Y-%m-%d %H:%M:%S'))
             else:
                 # Handle other data types here, or convert them to strings
@@ -542,6 +539,14 @@ class ChatGPTTool:
     # `print_tables`, `print_single_conversation`, and others.
     ###########################################################################
 
+    DISPLAY_STYLES = {
+        'default': {'divider': '', 'blank': True},
+        'irc': {'divider': '--', 'blank': False},
+        'full': {'divider': '-' * 79, 'blank': True},
+        'raw': {'divider': None, 'blank': True}
+    }
+    TIME_STRF = "%Y-%m-%d %H:%M:%S"
+
     def print_tables(self, db_name):
         conn = sqlite3.connect(db_name)
         cursor = conn.cursor()
@@ -577,24 +582,31 @@ class ChatGPTTool:
         terminal_size = shutil.get_terminal_size(fallback=(80, 24))
         return terminal_size.columns - 3  # Subtract 3 to account for ellipsis
 
-    def print_conversation(self, db_name, prefix, style='default'):
+    def print_conversation(self, db_name, prefixes, style):
         conn = sqlite3.connect(db_name)
         cursor = conn.cursor()
 
-        conversation_ids = self.get_matching_conversation_ids(cursor, prefix)
+        all_conversation_ids = []
 
-        if conversation_ids:
-            for conversation_id in conversation_ids:
+        for prefix in prefixes:
+            conversation_ids = self.get_matching_conversation_ids(cursor, prefix)
+            all_conversation_ids.extend(conversation_ids)
+
+        divider = self.DISPLAY_STYLES[style]['divider']
+
+        if all_conversation_ids:
+            for i, conversation_id in enumerate(all_conversation_ids):
                 self.print_single_conversation(cursor, conversation_id, style)
+                if i < len(all_conversation_ids) - 1 and divider:
+                    print(divider)
         else:
-            print(f"No conversations found with prefix: {prefix}")
+            print(f"No conversations found with prefixes: {', '.join(prefixes)}")
 
         conn.close()
 
     def get_matching_conversation_ids(self, cursor, prefix):
         cursor.execute(f"SELECT id FROM {self.CHAT_TABLE} WHERE id LIKE ?", (f"{prefix}%",))
         return [row[0] for row in cursor.fetchall()]
-
 
     def print_single_conversation(self, cursor, conversation_id, style):
         cursor.execute(f"SELECT * FROM {self.CHAT_TABLE} WHERE id = ?", (conversation_id,))
@@ -607,94 +619,79 @@ class ChatGPTTool:
         column_names = [column[0] for column in cursor.description]
         conversation = dict(zip(column_names, row))
 
-        if style == 'irc':
-            self.print_irc_style(conversation)
-        elif style == 'raw':
-            self.print_raw_style(conversation)
-        elif style == 'full':
-            self.print_full_style(conversation)
+        self.print_header(conversation, style)
+        self.print_messages(conversation, style)
+
+    def print_header(self, conversation, style):
+        blank = self.DISPLAY_STYLES[style]['blank']
+        if style == 'raw':
+            for key, value in conversation.items():
+                if key != 'mapping':
+                    print(f"{key}: {value}")
         else:
-            self.print_default_style(conversation)
+            print(f"Title: {conversation['title']}")
+            print(f"ID: {conversation['id']}")
+            if style=='irc' or style=='full':
+                print(f"Created: {datetime.fromtimestamp(float(conversation['create_time'])).strftime(self.TIME_STRF)}")
+                print(f"Updated: {datetime.fromtimestamp(float(conversation['update_time'])).strftime(self.TIME_STRF)}")
+        if blank:
+            print()
 
-    def print_default_style(self, conversation):
-        # Print conversation header
-        print(f"\nTitle: {conversation['title']}")
-        print(f"ID: {conversation['id']}\n")
-
-        # Print messages
+    def print_messages(self, conversation, style):
+        blank = self.DISPLAY_STYLES[style]['blank']
         messages = self.get_conversation_messages(conversation)
+        if style == 'raw':
+            mapping = ast.literal_eval(conversation['mapping'])
+
         if messages:
             for message in messages:
-                author = str(message['author'])
-                if author == "assistant":
-                    author = "ChatGPT"
-                if author != "system":
-                    text = message['text']
-                    print(f"{author}: {text}\n")
-
-    def print_irc_style(self, conversation):
-        # Print conversation header
-        print(f"\nTitle: {conversation['title']}")
-        print(f"ID: {conversation['id']}")
-        print(f"Created: {datetime.fromtimestamp(float(conversation['create_time'])).strftime(self.TIME_STRF)}")
-        print(f"Updated: {datetime.fromtimestamp(float(conversation['update_time'])).strftime(self.TIME_STRF)}\n")
-
-        # Print messages in IRC style
-        messages = self.get_conversation_messages(conversation)
-        if messages:
-            for message in messages:
-                timestamp = message['timestamp'] or 0
-                timestamp = datetime.fromtimestamp(float(timestamp)).strftime(self.TIME_STRF)
                 author = str(message['author'])
                 text = message['text']
-                print(f"{timestamp} <{author}> {text}\n")
-
-    def print_raw_style(self, conversation):
-        # Print all information in the conversation object
-        for key, value in conversation.items():
-            print(f"{key}: {value}")
-
-    def print_full_style(self, conversation):
-        # Print individual messages in 'full' style
-        messages = self.get_conversation_messages(conversation)
-        if messages:
-            for message in messages:
-                author = str(message['author'])
-                timestamp = message['timestamp'] or 0
-                if timestamp is not None:
+                if style == 'raw':
+                    id = message['id']
+                    node = mapping[id]
+                    print(f"node: {node}")
+                elif style == 'irc' or style == 'full':
+                    timestamp = message['timestamp'] or 0
                     timestamp = datetime.fromtimestamp(float(timestamp)).strftime(self.TIME_STRF)
-                text = message['text']
-                print(f"{timestamp} <{author}> {text}\n")
+                    print(f"{timestamp} <{author}> {text}")
+                else: # default style
+                    if author == "system":
+                        continue
+                    elif author == "assistant":
+                        author = "ChatGPT"
+                    print(f"{author}: {text}")
+                if blank:
+                    print()
 
     def get_conversation_messages(self, conversation):
-        # Check if 'mapping' key is in conversation and is not None
         if 'mapping' not in conversation or not conversation['mapping']:
-            print("Warning: 'mapping' field is missing or empty in conversation.")
+            print(f"Warning: 'mapping' field is missing or empty in conversation ID: {conversation['id']}")
             return []
 
         try:
-            # Safely evaluate the string as a dictionary
+            # mapping = json.loads(conversation['mapping'])
             mapping = ast.literal_eval(conversation['mapping'])
-        except (json.JSONDecodeError, SyntaxError, ValueError, IndexError) as e:
-            print("Warning: Unable to extract conversation mapping.")
-            if self.verbose:
-                print(e)
+        except json.JSONDecodeError as e:
+            print(f"Error decoding 'mapping' field for conversation ID: {conversation['id']}")
+            print(f"JSON Decode Error: {e}")
+            print(f"Mapping string: {conversation['mapping']}")
             return []
 
         messages = []
         current_node = conversation['current_node']
         while current_node is not None:
-            node = mapping[current_node]
-            if "message" in node and node["message"]:
+            node = mapping.get(current_node)
+            if node and "message" in node and node["message"]:
                 message = node["message"]
                 if "author" in message and "content" in message:
                     author = message["author"]["role"]
-                    timestamp = message.get("create_time", "")
+                    timestamp = message.get("create_time", 0)
                     content = message["content"]
                     if "content_type" in content and content["content_type"] == "text" and "parts" in content:
                         text = content["parts"][0]
-                        messages.append({"author": author, "timestamp": timestamp, "text": text})
-            current_node = node["parent"]
+                        messages.append({"id": current_node, "author": author, "timestamp": timestamp, "text": text})
+            current_node = node.get("parent")
 
         return messages[::-1]
 
@@ -900,8 +897,7 @@ class ChatGPTTool:
         elif self.args.subcommand == "print":
             print("Action: Print conversation")
             if self.args.prefixes:
-                for prefix in self.args.prefixes:
-                    self.print_conversation(self.args.db_name, prefix, self.args.style)
+                self.print_conversation(self.args.db_name, self.args.prefixes, self.args.style)
             else:
                 print("Error: Please specify one or more conversations to print.")
                 sys.exit(1)
