@@ -343,7 +343,6 @@ class ChatGPTTool:
                 converted_values.append(str(value))
         return converted_values
 
-
     # info
     ###########################################################################
     # Include functions that provide information about the database, such as
@@ -623,6 +622,7 @@ class ChatGPTTool:
         self.print_messages(conversation, style)
 
     def print_header(self, conversation, style):
+        divider = self.DISPLAY_STYLES[style]['divider']
         blank = self.DISPLAY_STYLES[style]['blank']
         if style == 'raw':
             for key, value in conversation.items():
@@ -631,10 +631,18 @@ class ChatGPTTool:
         else:
             print(f"Title: {conversation['title']}")
             print(f"ID: {conversation['id']}")
-            if style=='irc' or style=='full':
-                print(f"Created: {datetime.fromtimestamp(float(conversation['create_time'])).strftime(self.TIME_STRF)}")
-                print(f"Updated: {datetime.fromtimestamp(float(conversation['update_time'])).strftime(self.TIME_STRF)}")
-        if blank:
+            if style != 'default':
+                print(f"Create time: {datetime.fromtimestamp(float(conversation['create_time'])).strftime(self.TIME_STRF)}")
+                print(f"Update time: {datetime.fromtimestamp(float(conversation['update_time'])).strftime(self.TIME_STRF)}")
+            if style=='full':
+                print(f"Current node: {conversation['current_node']}")
+                print(f"Moderation results: {conversation['moderation_results']}")
+                print(f"Plugin IDs: {conversation['plugin_ids']}")
+                if "conversation_id" in conversation:
+                    print(f"Conversation ID: {conversation['conversation_id']}")
+                if "conversation_template_id" in conversation:
+                    print(f"Conversation Template ID: {conversation['conversation_template_id']}")
+        if divider or blank: # infer section break
             print()
 
     def print_messages(self, conversation, style):
