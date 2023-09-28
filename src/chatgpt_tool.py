@@ -36,6 +36,10 @@ class ChatGPTTool:
         # Add more mappings if needed
     }
 
+    EXIT_SUCCESS = 0
+    EXIT_ERROR = 1
+    EXIT_USAGE_ERROR = 2
+
     # init
     ###########################################################################
     # This section contains the setup for the command-line interface (CLI) and
@@ -69,8 +73,8 @@ class ChatGPTTool:
         # Subcommand: export
         export_parser = subparsers.add_parser("export", help="Export conversations from the SQLite database")
         export_parser.add_argument("path", help="Output directory for export")
-        export_parser.add_argument("-style", choices=self.DISPLAY_STYLES.keys(), default='default', help="Choose a display style (default, alternative)")
-        export_parser.add_argument("-format", choices=['text', 'html', 'json'], default='json', help="Choose an output format (text, html, json)")
+        export_parser.add_argument("-style", choices=self.DISPLAY_STYLES.keys(), default='default', help="Choose a display style")
+        export_parser.add_argument("-format", choices=['text', 'html', 'json'], default='json', help="Choose an output format")
         export_parser.add_argument("prefixes", nargs="*", help="Export conversations with IDs starting with the specified prefix")
 
         # Subcommand: print
@@ -890,30 +894,34 @@ class ChatGPTTool:
     ###########################################################################
 
     def run(self):
+        if self.verbose:
+            print(f"Subcommand: {self.args.subcommand}")
+            print("Parsed Arguments:")
+            for arg, value in vars(self.args).items():
+                print(f"  {arg}: {value}")
+
+        exit_code = self.EXIT_SUCCESS  # Initialize with success
+
         if self.args.subcommand == "import":
-            print("Action: Import")
-            self.import_data(self.args.db_name, self.args.path)
+            exit_code = self.import_data(self.args.db_name, self.args.path)
         elif self.args.subcommand == "show":
-            print("Action: Display database tables")
-            self.print_tables(self.args.db_name)
+            exit_code = self.print_tables(self.args.db_name)
         elif self.args.subcommand == "info":
-            print("Action: Display database information")
-            self.info(self.args.db_name)
+            exit_code = self.info(self.args.db_name)
         elif self.args.subcommand == "export":
-            print(f"Action: Export conversations in {self.args.export_format} format")
-            self.export_conversations(self.args.db_name, self.args.path, self.args.format, self.args.prefixes, self.args.style)
+            exit_code = self.export_conversations(self.args.db_name, self.args.path, self.args.format, self.args.prefixes, self.args.style)
         elif self.args.subcommand == "print":
-            print("Action: Print conversation")
-            if self.args.prefixes:
-                self.print_conversation(self.args.db_name, self.args.prefixes, self.args.style)
-            else:
-                print("Error: Please specify one or more conversations to print.")
-                sys.exit(1)
+            exit_code = self.print_conversation(self.args.db_name, self.args.prefixes, self.args.style)
         elif self.args.subcommand == "inspect":
-            print("Action: Inspect data files")
-            self.inspect_data(self.args.path)
+            exit_code = self.inspect_data(self.args.path)
         else:
             self.parser.print_help()
+            exit_code = self.EXIT_USAGE_ERROR  # Set exit code to indicate a usage error
+
+        if self.verbose:
+            print("Exit Code:", exit_code)
+
+        sys.exit(exit_code)  # Exit the script with the determined exit code
 
 # main
 ###############################################################################

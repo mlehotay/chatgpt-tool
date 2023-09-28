@@ -25,8 +25,8 @@ class CLITestCase(unittest.TestCase):
 
     def test_import_command(self):
         # Test the "import" command and verify the expected behavior
-        result = subprocess.run(["python3", "src/chatgpt_tool.py", "import", self.data_dir], capture_output=True, text=True)
-        self.assertIn("Action: Import", result.stdout)
+        result = subprocess.run(["python3", "src/chatgpt_tool.py", "-v", "import", self.data_dir], capture_output=True, text=True)
+        self.assertIn("subcommand: import", result.stdout)
         self.assertEqual(result.returncode, 0)
 
     # More test methods...
