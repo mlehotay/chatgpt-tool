@@ -1,3 +1,4 @@
+# src/chatgpt_tool.py
 import argparse
 import ast
 import hashlib
@@ -88,7 +89,7 @@ class ChatGPTTool:
 
         self.args = self.parser.parse_args()
         self.verbose = self.args.verbose
-        self.db_path = self.args.db_name  # Update self.db_path based on parsed args
+        self.db_path = self.args.db_name  # Update self.db_path with parsed value
 
     # import
     ###########################################################################
@@ -118,6 +119,22 @@ class ChatGPTTool:
                         self.traverse_files(extracted_file_path, process_function, *args)
         else:
             self.process_file(path, process_function, *args)
+
+    # FILENAME_TO_OBJECT_TYPE_MAP = {
+    #    "conversations.json": "conversation",
+    #    "user.json": "user",
+    #    "message_feedback.json": "message_feedback",
+    #    "model_comparisons.json": "model_comparisons",
+    #    "shared_conversations.json": "shared_conversations",
+    #    "chat.html": "conversation"
+    # }
+    #
+    # def process_file(self, file_name):
+    #    object_type = self.FILENAME_TO_OBJECT_TYPE_MAP.get(file_name)
+    #    if object_type:
+    #        self.display_object_type(object_type)
+    #    else:
+    #        print(f"Unsupported file: {file_name}")
 
     def process_file(self, path, process_function, *args):
         _, file_extension = os.path.splitext(path)
@@ -550,6 +567,54 @@ class ChatGPTTool:
     }
     TIME_STRF = "%Y-%m-%d %H:%M:%S"
 
+    # def display_object_type(self, object_type):
+    #     conn = sqlite3.connect(self.db_path)
+    #     cursor = conn.cursor()
+    #
+    #     schema_info = self.get_schema_info(cursor, object_type)
+    #     self.display_object(object_type, schema_info)
+    #
+    #     cursor.close()
+    #     conn.close()
+    #
+    # def get_schema_info(self, cursor, object_type):
+    #     schema_info = {
+    #         "table_name": self.generate_table_name(object_type),
+    #         "column_names": ["id", "text", "author"],
+    #     }
+    #     return schema_info
+    #
+    # def generate_table_name(self, object_type):
+    #     schema_version = 1
+    #     file_name = f"{object_type}.json"
+    #
+    #     if os.path.exists(file_name):
+    #         schema_version = 2
+    #
+    #     table_name = f"{object_type}_v{schema_version}"
+    #     return table_name
+    #
+    # def display_table(self, table_name):
+    #     conn = sqlite3.connect(self.db_path)
+    #     cursor = conn.cursor()
+    #
+    #     cursor.execute(f"SELECT id FROM {table_name}")
+    #     all_object_ids = [row[0] for row in cursor.fetchall()]
+    #
+    #     divider = self.DISPLAY_STYLES['style1']['divider']
+    #
+    #     if all_object_ids:
+    #         for i, object_id in enumerate(all_object_ids):
+    #             self.print_single_object(cursor, table_name, object_id, 'style1', self.FILENAME_TO_OBJECT_TYPE_MAP.get(table_name))
+    #             if i < len(all_object_ids) - 1 and divider:
+    #                 print(divider)
+    #     else:
+    #         print(f"No objects found in {table_name}")
+    #
+    #     cursor.close()
+    #     conn.close()
+
+
     def print_tables(self, db_name):
         conn = sqlite3.connect(db_name)
         cursor = conn.cursor()
@@ -584,6 +649,37 @@ class ChatGPTTool:
     def get_truncation_length(self):
         terminal_size = shutil.get_terminal_size(fallback=(80, 24))
         return terminal_size.columns - 3  # Subtract 3 to account for ellipsis
+
+
+    # def print_single_object(self, cursor, table_name, object_id, style, object_type):
+    #     if object_type == "conversation":
+    #         self.display_conversation(cursor, table_name, object_id)
+    #     elif object_type == "user":
+    #         self.display_user(cursor, table_name, object_id)
+    #     else:
+    #         print(f"Invalid object type: {object_type}")
+    #
+    # def display_conversation(self, cursor, table_name, object_id):
+    #     cursor.execute(f"SELECT id, text, author FROM {table_name} WHERE id=?", (object_id,))
+    #     row = cursor.fetchone()
+    #     if row:
+    #         print(f"ID: {row[0]}")
+    #         print(f"Text: {row[1]}")
+    #         print(f"Author: {row[2]}")
+    #         print()
+    #     else:
+    #         print(f"No conversation found with ID: {object_id}")
+    #
+    # def display_user(self, cursor, table_name, object_id):
+    #     cursor.execute(f"SELECT id, username FROM {table_name} WHERE id=?", (object_id,))
+    #     row = cursor.fetchone()
+    #     if row:
+    #         print(f"User ID: {row[0]}")
+    #         print(f"Username: {row[1]}")
+    #         print()
+    #     else:
+    #         print(f"No user found with ID: {object_id}")
+
 
     def print_conversation(self, db_name, prefixes, style):
         conn = sqlite3.connect(db_name)
@@ -914,6 +1010,9 @@ class ChatGPTTool:
             exit_code = self.print_conversation(self.args.db_name, self.args.prefixes, self.args.style)
         elif self.args.subcommand == "inspect":
             exit_code = self.inspect_data(self.args.path)
+
+        # to do: add text search for conversations and messages
+
         else:
             self.parser.print_help()
             exit_code = self.EXIT_USAGE_ERROR  # Set exit code to indicate a usage error
