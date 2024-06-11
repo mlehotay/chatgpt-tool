@@ -25,15 +25,27 @@ ChatGPT Tool is a command-line utility for importing ChatGPT conversations from 
 
 """
 
+class ConversationIdentifier:
+    def __init__(self, table, conversation_id, timestamp=None):
+        self.table = table
+        self.conversation_id = conversation_id
+        self.timestamp = timestamp
+
+    def __repr__(self):
+        return f"ConversationIdentifier(table={self.table}, conversation_id={self.conversation_id}, timestamp={self.timestamp})"
+
 class ChatGPTTool:
     DB_NAME = "chatgpt.db"
     DATA_PATH = "data"
     EXPORT_PATH = "export"
     SCHEMA_TABLE = "schema"
     CHAT_TABLE = "conversations"
+    USER_TABLE = "user"
 
     TABLE_MAPPING = {
-        "chat": CHAT_TABLE,
+        "chat": CHAT_TABLE, # ConversationIdentifier
+        "user": USER_TABLE,
+        # "raw": OTHER_TABLE,
         # Add more mappings if needed
     }
 
@@ -48,6 +60,9 @@ class ChatGPTTool:
     ###########################################################################
 
     def __init__(self, db_path=None):
+        """
+        Initialize the ChatGPTTool with command-line arguments and database path.
+        """
         self.verbose = False
         self.db_path = db_path or self.DB_NAME
         self.schema_cache = {}  # Initialize the cache dictionary
@@ -74,14 +89,16 @@ class ChatGPTTool:
         # Subcommand: export
         export_parser = subparsers.add_parser("export", help="Export conversations from the SQLite database")
         export_parser.add_argument("path", help="Output directory for export")
-        export_parser.add_argument("-style", choices=self.DISPLAY_STYLES.keys(), default='default', help="Choose a display style")
-        export_parser.add_argument("-format", choices=['text', 'html', 'json'], default='json', help="Choose an output format")
+        export_parser.add_argument("--style", choices=self.DISPLAY_STYLES.keys(), default='default', help="Choose a display style")
+        export_parser.add_argument("--format", choices=['text', 'html', 'json'], default='json', help="Choose an output format")
         export_parser.add_argument("prefixes", nargs="*", help="Export conversations with IDs starting with the specified prefix")
 
         # Subcommand: print
-        print_parser = subparsers.add_parser("print", help="Print conversation")
-        print_parser.add_argument("prefixes", nargs="*", help="Print conversations with IDs starting with the specified prefix")
-        print_parser.add_argument("-style", choices=self.DISPLAY_STYLES.keys(), default='default', help="Choose a display style (default, alternative)")
+
+        print_parser = subparsers.add_parser('print', help='Print data from the database')
+        print_parser.add_argument('prefixes', nargs='+', type=str, help='Prefixes of conversation IDs or user IDs to print')
+        print_parser.add_argument("--style", choices=self.DISPLAY_STYLES.keys(), default='default', help="Choose a display style (default, irc, full, raw)")
+        # print_parser.add_argument('--style', type=str, choices=['default', 'text', 'html'], default='default', help='Style of printed output')
 
         # Subcommand: inspect
         inspect_parser = subparsers.add_parser("inspect", help="Inspect data files")
@@ -99,11 +116,17 @@ class ChatGPTTool:
     ###########################################################################
 
     def import_data(self, db_name, data_path):
+        """
+        Import data from JSON files into the SQLite database.
+        """
         with sqlite3.connect(db_name) as conn:
             self.create_schema_table(conn.cursor())  # Create schema table
             self.traverse_files(data_path, self.import_json_data_to_sqlite, conn)
 
     def traverse_files(self, path, process_function, *args):
+        """
+        Traverse files in the specified directory and process them.
+        """
         if os.path.isdir(path):
             for root, _, filenames in os.walk(path):
                 for filename in filenames:
@@ -120,23 +143,10 @@ class ChatGPTTool:
         else:
             self.process_file(path, process_function, *args)
 
-    # FILENAME_TO_OBJECT_TYPE_MAP = {
-    #    "conversations.json": "conversation",
-    #    "user.json": "user",
-    #    "message_feedback.json": "message_feedback",
-    #    "model_comparisons.json": "model_comparisons",
-    #    "shared_conversations.json": "shared_conversations",
-    #    "chat.html": "conversation"
-    # }
-    #
-    # def process_file(self, file_name):
-    #    object_type = self.FILENAME_TO_OBJECT_TYPE_MAP.get(file_name)
-    #    if object_type:
-    #        self.display_object_type(object_type)
-    #    else:
-    #        print(f"Unsupported file: {file_name}")
-
     def process_file(self, path, process_function, *args):
+        """
+        Process individual files based on their extension.
+        """
         _, file_extension = os.path.splitext(path)
 
         if self.verbose:
@@ -160,6 +170,9 @@ class ChatGPTTool:
             print(f"Warning: Unexpected file format '{path}'")
 
     def get_table_name(self, file_path):
+        """
+        Generate a valid SQLite table name based on the file path.
+        """
         base_filename = os.path.basename(file_path)
         suggested_name = os.path.splitext(base_filename)[0]
 
@@ -172,6 +185,9 @@ class ChatGPTTool:
         return self.TABLE_MAPPING.get(table_name, table_name)
 
     def get_versioned_table_name(self, cursor, table_name, column_names):
+        """
+        Get a versioned table name if there are schema changes.
+        """
         versioned_table_name = table_name
         version = 1
         hash_value = self.calculate_column_names_hash(column_names)
@@ -208,6 +224,9 @@ class ChatGPTTool:
     # extraneous data at the end.
 
     def extract_json_from_html(self, html_content):
+        """
+        Extract JSON data from HTML content if present.
+        """
         # Parse the HTML content using Gazpacho
         soup = Soup(html_content)
 
@@ -273,6 +292,9 @@ class ChatGPTTool:
         return []
 
     def import_json_data_to_sqlite(self, conn, json_data, path):
+        """
+        Import JSON data into SQLite database.
+        """
         if not json_data:
             if self.verbose:
                 print(f"Skipping import for file: {path} (empty JSON data)")
@@ -290,6 +312,9 @@ class ChatGPTTool:
         cursor.close()  # Close the cursor
 
     def import_single_json_object(self, cursor, table_name, json_object):
+        """
+        Import a single JSON object into the SQLite database.
+        """
         id_field_name, column_names = self.get_id_and_column_names(json_object)
         try:
             cursor.execute("BEGIN")
@@ -427,9 +452,12 @@ class ChatGPTTool:
                 print(f"  {column_info[1]}")
         print()
 
-    def get_table_names(self, cursor):
+    def get_table_names(self, cursor, filter_prefix=None):
         cursor.execute("SELECT name FROM sqlite_master WHERE type='table';")
-        return [row[0] for row in cursor.fetchall()]
+        tables = [row[0] for row in cursor.fetchall()]
+        if filter_prefix:
+            tables = [table for table in tables if table.startswith(filter_prefix)]
+        return tables
 
     def get_column_names(self, cursor, table_name):
         cursor.execute(f"PRAGMA table_info({table_name});")
@@ -567,77 +595,74 @@ class ChatGPTTool:
     }
     TIME_STRF = "%Y-%m-%d %H:%M:%S"
 
-    # def display_object_type(self, object_type):
-    #     conn = sqlite3.connect(self.db_path)
-    #     cursor = conn.cursor()
-    #
-    #     schema_info = self.get_schema_info(cursor, object_type)
-    #     self.display_object(object_type, schema_info)
-    #
-    #     cursor.close()
-    #     conn.close()
-    #
-    # def get_schema_info(self, cursor, object_type):
-    #     schema_info = {
-    #         "table_name": self.generate_table_name(object_type),
-    #         "column_names": ["id", "text", "author"],
-    #     }
-    #     return schema_info
-    #
-    # def generate_table_name(self, object_type):
-    #     schema_version = 1
-    #     file_name = f"{object_type}.json"
-    #
-    #     if os.path.exists(file_name):
-    #         schema_version = 2
-    #
-    #     table_name = f"{object_type}_v{schema_version}"
-    #     return table_name
-    #
-    # def display_table(self, table_name):
-    #     conn = sqlite3.connect(self.db_path)
-    #     cursor = conn.cursor()
-    #
-    #     cursor.execute(f"SELECT id FROM {table_name}")
-    #     all_object_ids = [row[0] for row in cursor.fetchall()]
-    #
-    #     divider = self.DISPLAY_STYLES['style1']['divider']
-    #
-    #     if all_object_ids:
-    #         for i, object_id in enumerate(all_object_ids):
-    #             self.print_single_object(cursor, table_name, object_id, 'style1', self.FILENAME_TO_OBJECT_TYPE_MAP.get(table_name))
-    #             if i < len(all_object_ids) - 1 and divider:
-    #                 print(divider)
-    #     else:
-    #         print(f"No objects found in {table_name}")
-    #
-    #     cursor.close()
-    #     conn.close()
+    def display_object_type(self, object_type):
+        conn = sqlite3.connect(self.db_path)
+        cursor = conn.cursor()
 
+        schema_info = self.get_schema_info(cursor, object_type)
+        self.display_object(object_type, schema_info)
 
-    def print_tables(self, db_name):
+        cursor.close()
+        conn.close()
+
+    def get_schema_info(self, cursor, object_type):
+        schema_info = {
+            "table_name": self.generate_table_name(object_type),
+            "column_names": ["id", "text", "author"],
+        }
+        return schema_info
+
+    def generate_table_name(self, object_type):
+        schema_version = 1
+        file_name = f"{object_type}.json"
+
+        if os.path.exists(file_name):
+            schema_version = 2
+
+        table_name = f"{object_type}_v{schema_version}"
+        return table_name
+
+    def display_table(self, table_name):
+        conn = sqlite3.connect(self.db_path)
+        cursor = conn.cursor()
+
+        cursor.execute(f"SELECT id FROM {table_name}")
+        all_object_ids = [row[0] for row in cursor.fetchall()]
+
+        divider = self.DISPLAY_STYLES['style1']['divider']
+
+        if all_object_ids:
+            for i, object_id in enumerate(all_object_ids):
+                self.print_single_object(cursor, table_name, object_id, 'style1', self.FILENAME_TO_OBJECT_TYPE_MAP.get(table_name))
+                if i < len(all_object_ids) - 1 and divider:
+                     print(divider)
+        else:
+            print(f"No objects found in {table_name}")
+
+        cursor.close()
+        conn.close()
+
+    def print_tables(self, db_name, file_handle=sys.stdout):
         conn = sqlite3.connect(db_name)
         cursor = conn.cursor()
 
         truncation_length = self.get_truncation_length()
 
-        # Get the table names
         cursor.execute("SELECT name FROM sqlite_master WHERE type='table'")
         tables = cursor.fetchall()
 
-        # Print the tables and their content
         for table in tables:
             table_name = table[0]
-            print(f"Table: {table_name}")
+            print(f"Table: {table_name}", file=file_handle)
             cursor.execute(f"PRAGMA table_info({table_name})")
             columns = cursor.fetchall()
             column_names = [column[1] for column in columns]
-            print(self.truncate_string(str(column_names), truncation_length))
+            print(self.truncate_string(str(column_names), truncation_length), file=file_handle)
             cursor.execute(f"SELECT * FROM {table_name}")
             rows = cursor.fetchall()
             for row in rows:
-                print(self.truncate_string(str(row), truncation_length))
-            print()
+                print(self.truncate_string(str(row), truncation_length), file=file_handle)
+            print(file=file_handle)
 
         conn.close()
 
@@ -650,38 +675,72 @@ class ChatGPTTool:
         terminal_size = shutil.get_terminal_size(fallback=(80, 24))
         return terminal_size.columns - 3  # Subtract 3 to account for ellipsis
 
+    def print_data(self, db_name, prefixes, style='default'):
+        with sqlite3.connect(db_name) as conn:
+            cursor = conn.cursor()
+            for prefix in prefixes:
+                table_name = self.get_table_name_for_prefix(prefix)
+                if table_name:
+                    if table_name == self.CHAT_TABLE:
+                        cursor.execute(f"""
+                            SELECT * FROM {table_name}
+                            WHERE conversation_id LIKE ?
+                        """, (f'{prefix}%',))
+                    elif table_name == self.USER_TABLE:
+                        cursor.execute(f"""
+                            SELECT * FROM {table_name}
+                            WHERE user_id LIKE ?
+                        """, (f'{prefix}%',))
+                    records = cursor.fetchall()
+                    for record in records:
+                        self.print_record(record, style)
 
-    # def print_single_object(self, cursor, table_name, object_id, style, object_type):
-    #     if object_type == "conversation":
-    #         self.display_conversation(cursor, table_name, object_id)
-    #     elif object_type == "user":
-    #         self.display_user(cursor, table_name, object_id)
-    #     else:
-    #         print(f"Invalid object type: {object_type}")
-    #
-    # def display_conversation(self, cursor, table_name, object_id):
-    #     cursor.execute(f"SELECT id, text, author FROM {table_name} WHERE id=?", (object_id,))
-    #     row = cursor.fetchone()
-    #     if row:
-    #         print(f"ID: {row[0]}")
-    #         print(f"Text: {row[1]}")
-    #         print(f"Author: {row[2]}")
-    #         print()
-    #     else:
-    #         print(f"No conversation found with ID: {object_id}")
-    #
-    # def display_user(self, cursor, table_name, object_id):
-    #     cursor.execute(f"SELECT id, username FROM {table_name} WHERE id=?", (object_id,))
-    #     row = cursor.fetchone()
-    #     if row:
-    #         print(f"User ID: {row[0]}")
-    #         print(f"Username: {row[1]}")
-    #         print()
-    #     else:
-    #         print(f"No user found with ID: {object_id}")
+    def print_record(self, record, style):
+        if style == 'json':
+            print(json.dumps(record, indent=2))
+        elif style == 'text':
+            print(record)
+        elif style == 'html':
+            print(f"<pre>{json.dumps(record, indent=2)}</pre>")
+        else:
+            print(record)
 
+    def get_table_name_for_prefix(self, prefix):
+        for table_name in self.TABLE_MAPPING.values():
+            if table_name.startswith(prefix):
+                return table_name
+        return None
 
-    def print_conversation(self, db_name, prefixes, style):
+    def print_single_object(self, cursor, table_name, object_id, style, object_type):
+         if object_type == "conversation":
+             self.display_conversation(cursor, table_name, object_id)
+         elif object_type == "user":
+             self.display_user(cursor, table_name, object_id)
+         else:
+             print(f"Invalid object type: {object_type}")
+
+    def display_conversation(self, cursor, table_name, object_id):
+         cursor.execute(f"SELECT id, text, author FROM {table_name} WHERE id=?", (object_id,))
+         row = cursor.fetchone()
+         if row:
+             print(f"ID: {row[0]}")
+             print(f"Text: {row[1]}")
+             print(f"Author: {row[2]}")
+             print()
+         else:
+             print(f"No conversation found with ID: {object_id}")
+
+    def display_user(self, cursor, table_name, object_id):
+        cursor.execute(f"SELECT id, username FROM {table_name} WHERE id=?", (object_id,))
+        row = cursor.fetchone()
+        if row:
+            print(f"User ID: {row[0]}")
+            print(f"Username: {row[1]}")
+            print()
+        else:
+            print(f"No user found with ID: {object_id}")
+
+    def print_conversation(self, db_name, prefixes, style, file_handle=sys.stdout):
         conn = sqlite3.connect(db_name)
         cursor = conn.cursor()
 
@@ -691,63 +750,83 @@ class ChatGPTTool:
             conversation_ids = self.get_matching_conversation_ids(cursor, prefix)
             all_conversation_ids.extend(conversation_ids)
 
-        divider = self.DISPLAY_STYLES[style]['divider']
+        divider = self.DISPLAY_STYLES.get(style, {}).get('divider', '')
 
         if all_conversation_ids:
-            for i, conversation_id in enumerate(all_conversation_ids):
-                self.print_single_conversation(cursor, conversation_id, style)
+            for i, conversation_tuple in enumerate(all_conversation_ids):
+                self.print_single_conversation(cursor, conversation_tuple, style, file_handle)
                 if i < len(all_conversation_ids) - 1 and divider:
-                    print(divider)
+                    print(divider, file=file_handle)
         else:
-            print(f"No conversations found with prefixes: {', '.join(prefixes)}")
+            print(f"No conversations found with prefixes: {', '.join(prefixes)}", file=file_handle)
 
         conn.close()
 
     def get_matching_conversation_ids(self, cursor, prefix):
-        cursor.execute(f"SELECT id FROM {self.CHAT_TABLE} WHERE id LIKE ?", (f"{prefix}%",))
-        return [row[0] for row in cursor.fetchall()]
+        tables = self.get_table_names(cursor, filter_prefix=self.CHAT_TABLE)
+        matching_ids = []
+        for table in tables:
+            cursor.execute(f"SELECT id FROM {table} WHERE id LIKE ?", (f"{prefix}%",))
+            matching_ids.extend([(table, row[0]) for row in cursor.fetchall()])
+        return matching_ids
 
-    def print_single_conversation(self, cursor, conversation_id, style):
-        cursor.execute(f"SELECT * FROM {self.CHAT_TABLE} WHERE id = ?", (conversation_id,))
+    def fetch_conversation(self, cursor, conversation_tuple):
+        table, conversation_id = conversation_tuple
+        cursor.execute(f"SELECT * FROM {table} WHERE id = ?", (conversation_id,))
         row = cursor.fetchone()
+        if row:
+            column_names = [column[0] for column in cursor.description]
+            return dict(zip(column_names, row))
+        return None
 
-        if not row:
-            print(f"Conversation not found: {conversation_id}")
-            return
+    # Updated print functions to handle file output
+    def print_single_conversation(self, cursor, conversation_tuple, style, file_handle=None):
+        table, conversation_id = conversation_tuple
+        conversation = self.fetch_conversation(cursor, (table, conversation_id))
+        if conversation:
+            self.print_header(conversation, style, file_handle)
+            self.print_messages(conversation, style, file_handle)
+        else:
+            output = f"Conversation not found: {conversation_id} in {table}"
+            if file_handle:
+                file_handle.write(output + "\n")
+            else:
+                print(output)
 
-        column_names = [column[0] for column in cursor.description]
-        conversation = dict(zip(column_names, row))
-
-        self.print_header(conversation, style)
-        self.print_messages(conversation, style)
-
-    def print_header(self, conversation, style):
+    def print_header(self, conversation, style, file_handle=None):
         divider = self.DISPLAY_STYLES[style]['divider']
         blank = self.DISPLAY_STYLES[style]['blank']
+        output = ""
         if style == 'raw':
             for key, value in conversation.items():
                 if key != 'mapping':
-                    print(f"{key}: {value}")
+                    output += f"{key}: {value}\n"
         else:
-            print(f"Title: {conversation['title']}")
-            print(f"ID: {conversation['id']}")
+            output += f"Title: {conversation['title']}\n"
+            output += f"ID: {conversation['id']}\n"
             if style != 'default':
-                print(f"Create time: {datetime.fromtimestamp(float(conversation['create_time'])).strftime(self.TIME_STRF)}")
-                print(f"Update time: {datetime.fromtimestamp(float(conversation['update_time'])).strftime(self.TIME_STRF)}")
-            if style=='full':
-                print(f"Current node: {conversation['current_node']}")
-                print(f"Moderation results: {conversation['moderation_results']}")
-                print(f"Plugin IDs: {conversation['plugin_ids']}")
+                output += f"Create time: {datetime.fromtimestamp(float(conversation['create_time'])).strftime(self.TIME_STRF)}\n"
+                output += f"Update time: {datetime.fromtimestamp(float(conversation['update_time'])).strftime(self.TIME_STRF)}\n"
+            if style == 'full':
+                output += f"Current node: {conversation['current_node']}\n"
+                output += f"Moderation results: {conversation['moderation_results']}\n"
+                output += f"Plugin IDs: {conversation['plugin_ids']}\n"
                 if "conversation_id" in conversation:
-                    print(f"Conversation ID: {conversation['conversation_id']}")
+                    output += f"Conversation ID: {conversation['conversation_id']}\n"
                 if "conversation_template_id" in conversation:
-                    print(f"Conversation Template ID: {conversation['conversation_template_id']}")
+                    output += f"Conversation Template ID: {conversation['conversation_template_id']}\n"
         if divider or blank: # infer section break
-            print()
+            output += "\n"
 
-    def print_messages(self, conversation, style):
+        if file_handle:
+            file_handle.write(output)
+        else:
+            print(output)
+
+    def print_messages(self, conversation, style, file_handle=None):
         blank = self.DISPLAY_STYLES[style]['blank']
         messages = self.get_conversation_messages(conversation)
+        output = ""
         if style == 'raw':
             mapping = ast.literal_eval(conversation['mapping'])
 
@@ -758,19 +837,24 @@ class ChatGPTTool:
                 if style == 'raw':
                     id = message['id']
                     node = mapping[id]
-                    print(f"node: {node}")
+                    output += f"node: {node}\n"
                 elif style == 'irc' or style == 'full':
                     timestamp = message['timestamp'] or 0
                     timestamp = datetime.fromtimestamp(float(timestamp)).strftime(self.TIME_STRF)
-                    print(f"{timestamp} <{author}> {text}")
+                    output += f"{timestamp} <{author}> {text}\n"
                 else: # default style
                     if author == "system":
                         continue
                     elif author == "assistant":
                         author = "ChatGPT"
-                    print(f"{author}: {text}")
+                    output += f"{author}: {text}\n"
                 if blank:
-                    print()
+                    output += "\n"
+
+        if file_handle:
+            file_handle.write(output)
+        else:
+            print(output)
 
     def get_conversation_messages(self, conversation):
         if 'mapping' not in conversation or not conversation['mapping']:
@@ -811,8 +895,9 @@ class ChatGPTTool:
     ###########################################################################
 
     def export_conversations(self, db_name, output_directory=None, export_format="json", prefixes=None, display_style='default'):
-        # Your existing code for exporting conversations
-        # Modify the output format based on the 'export_format' and 'display_style' parameters
+        """
+        Export conversations from the SQLite database.
+        """
         output_directory = output_directory or self.EXPORT_PATH
 
         if not os.path.exists(output_directory):
@@ -821,19 +906,20 @@ class ChatGPTTool:
         conn = sqlite3.connect(db_name)
         cursor = conn.cursor()
 
-        tables = self.get_table_names(cursor)
+        all_conversation_ids = []
 
-        for table in tables:
-            json_data = self.export_table_as_json(cursor, table)
+        for prefix in prefixes:
+            conversation_ids = self.get_matching_conversation_ids(cursor, prefix)
+            all_conversation_ids.extend(conversation_ids)
 
-            if json_data:
-                if prefix is None or table.startswith(prefix):
-                    if export_format == "html":
-                        self.export_conversations_as_html(table, json_data, output_directory)
-                    elif export_format == "json":
-                        self.export_conversations_as_json(table, json_data, output_directory)
-                    else:
-                        print(f"Unknown export format: {export_format}")
+        if export_format == "json":
+            self.export_conversations_as_json(cursor, all_conversation_ids, output_directory, display_style)
+        elif export_format == "html":
+            self.export_conversations_as_html(cursor, all_conversation_ids, output_directory, display_style)
+        elif export_format == "text":
+            self.export_conversations_as_plain_text(cursor, all_conversation_ids, output_directory)
+        else:
+            print(f"Unknown export format: {export_format}")
 
         conn.close()
 
@@ -861,6 +947,22 @@ class ChatGPTTool:
 
         conn.close()
 
+    def export_conversations_as_json(self, cursor, conversation_ids, output_directory, display_style):
+        for conversation_tuple in conversation_ids:
+            table, conversation_id = conversation_tuple
+            output_file = os.path.join(output_directory, f"{conversation_id}.json")
+            with open(output_file, 'w', encoding='utf-8') as file_handle:
+                self.print_single_conversation(cursor, conversation_tuple, 'json', file_handle)
+
+    def export_conversations_as_html(self, cursor, conversation_ids, output_directory, display_style):
+        for conversation_tuple in conversation_ids:
+            table, conversation_id = conversation_tuple
+            output_file = os.path.join(output_directory, f"{conversation_id}.html")
+            with open(output_file, 'w', encoding='utf-8') as file_handle:
+                file_handle.write("<html><body><pre>")
+                self.print_single_conversation(cursor, conversation_tuple, 'html', file_handle)
+                file_handle.write("</pre></body></html>")
+
     def export_conversation_as_html(self, conversation_id, conversation, output_directory):
         output_file = os.path.join(output_directory, f"{conversation_id}.html")
         template = self.load_template("conversation_template.html")
@@ -875,6 +977,13 @@ class ChatGPTTool:
         with open(output_file, "w") as file:
             json.dump(conversation, file, indent=4)
         print(f"Exported conversation {conversation_id} as JSON to {output_file}")
+
+    def export_conversations_as_plain_text(self, cursor, conversation_ids, output_directory):
+        for conversation_tuple in conversation_ids:
+            table, conversation_id = conversation_tuple
+            output_file = os.path.join(output_directory, f"{conversation_id}.txt")
+            with open(output_file, 'w', encoding='utf-8') as file_handle:
+                self.print_single_conversation(cursor, conversation_tuple, 'text', file_handle)
 
     def export_conversation_plain_text(self, db_name, conversation_ids, output_directory=None):
         output_directory = output_directory or self.EXPORT_PATH
@@ -895,16 +1004,6 @@ class ChatGPTTool:
             print("No conversations found.")
 
         conn.close()
-
-    def export_conversation_as_plain_text(self, conversation_id, conversation, output_directory):
-        output_file = os.path.join(output_directory, f"{conversation_id}.txt")
-
-        with open(output_file, "w") as file:
-            file.write(f"Conversation ID: {conversation_id}\n")
-            for key, value in conversation.items():
-                file.write(f"{key}: {value}\n")
-
-        print(f"Exported conversation {conversation_id} as plain text to {output_file}")
 
     def export_table_as_json(self, cursor, table_name):
         cursor.execute(f"SELECT * FROM {table_name}")
@@ -990,6 +1089,9 @@ class ChatGPTTool:
     ###########################################################################
 
     def run(self):
+        """
+        Execute the appropriate subcommand based on user input.
+        """
         if self.verbose:
             print(f"Subcommand: {self.args.subcommand}")
             print("Parsed Arguments:")
@@ -1011,7 +1113,9 @@ class ChatGPTTool:
         elif self.args.subcommand == "inspect":
             exit_code = self.inspect_data(self.args.path)
 
-        # to do: add text search for conversations and messages
+        # to do:
+        #     - add text search for conversations and messages
+        #     - filename globbing for CLI arguments
 
         else:
             self.parser.print_help()
