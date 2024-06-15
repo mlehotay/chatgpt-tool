@@ -91,8 +91,8 @@ class ChatGPTTool:
 
         # Subcommand: export
         export_parser = subparsers.add_parser("export", help="Export conversations from the SQLite database")
-        export_parser.add_argument("path", help="Output directory for export")
         export_parser.add_argument("prefixes", nargs="*", help="Export conversations with IDs starting with the specified prefix")
+        export_parser.add_argument("--path", dest="path", default=None, help="Output directory for export (default: 'export')")
         export_parser.add_argument("--style", choices=self.DISPLAY_STYLES.keys(), default='default', help="Choose a display style")
         export_parser.add_argument("--format", choices=['text', 'html', 'json'], default='text', help="Choose an output format")
 
@@ -654,12 +654,18 @@ class ChatGPTTool:
 
         conn.close()
 
-    def get_matching_conversation_ids(self, cursor, prefix):
+    def get_matching_conversation_ids(self, cursor, prefix=None):
         tables = self.get_table_names(cursor, filter_prefix=self.CHAT_TABLE)
         matching_ids = []
+
         for table in tables:
-            cursor.execute(f"SELECT id, create_time FROM {table} WHERE id LIKE ?", (f"{prefix}%",))
+            if prefix:
+                cursor.execute(f"SELECT id, create_time FROM {table} WHERE id LIKE ?", (f"{prefix}%",))
+            else:
+                cursor.execute(f"SELECT id, create_time FROM {table}")
+
             matching_ids.extend([Transcript(table, row[0], float(row[1])) for row in cursor.fetchall()])
+
         return matching_ids
 
     def fetch_conversation(self, cursor, transcript):
@@ -798,13 +804,16 @@ class ChatGPTTool:
 
         all_conversation_ids = []
 
-        for prefix in prefixes:
-            conversation_ids = self.get_matching_conversation_ids(cursor, prefix)
-            all_conversation_ids.extend(conversation_ids)
+        if prefixes is None or len(prefixes) == 0:
+            # Fetch all conversation IDs from all versions of conversation tables
+            all_conversation_ids = self.get_matching_conversation_ids(cursor, None)
+        else:
+            for prefix in prefixes:
+                conversation_ids = self.get_matching_conversation_ids(cursor, prefix)
+                all_conversation_ids.extend(conversation_ids)
 
-        if self.verbose:
-            print(f"Prefixes: {prefixes}")
-            print(f"Total conversations to export: {len(all_conversation_ids)}")
+        print(f"Prefixes: {prefixes}")
+        print(f"Total conversations to export: {len(all_conversation_ids)}")
 
         if export_format == "json":
             self.export_conversations_as_json(cursor, all_conversation_ids, output_directory, display_style)
@@ -821,7 +830,7 @@ class ChatGPTTool:
         for conversation in conversation_ids:
             output_file = os.path.join(output_directory, f"{conversation.conversation_id}.json")
             if self.verbose:
-                print(f"Exporting {conversation.conversation_id} to {output_file}")
+                print(f"Exporting {conversation} to {output_file}")
             with open(output_file, 'w', encoding='utf-8') as file_handle:
                 self.print_single_conversation(cursor, conversation, 'json', file_handle)
 
@@ -829,7 +838,7 @@ class ChatGPTTool:
         for conversation in conversation_ids:
             output_file = os.path.join(output_directory, f"{conversation.conversation_id}.html")
             if self.verbose:
-                print(f"Exporting {conversation.conversation_id} to {output_file}")
+                print(f"Exporting {conversation} to {output_file}")
             with open(output_file, 'w', encoding='utf-8') as file_handle:
                 file_handle.write("<html><body><pre>")
                 self.print_single_conversation(cursor, conversation, 'html', file_handle)
@@ -839,7 +848,7 @@ class ChatGPTTool:
         for conversation in conversation_ids:
             output_file = os.path.join(output_directory, f"{conversation.conversation_id}.txt")
             if self.verbose:
-                print(f"Exporting {conversation.conversation_id} to {output_file}")
+                print(f"Exporting {conversation} to {output_file}")
             with open(output_file, 'w', encoding='utf-8') as file_handle:
                 self.print_single_conversation(cursor, conversation, 'full', file_handle)
 
