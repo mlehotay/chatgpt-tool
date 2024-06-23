@@ -863,6 +863,7 @@ class ChatGPTTool:
         """
         for conversation in all_conversations:
             self.export_single_conversation_as_html(cursor, conversation)
+        self.generate_index_html(all_conversations)
 
     def export_single_conversation_as_html(self, cursor, conversation):
         """
@@ -944,6 +945,35 @@ class ChatGPTTool:
                 print(f"Exported {table} table as JSON to: {output_file}")
 
         conn.close()
+
+    def generate_index_html(self, all_conversations):
+        """
+        Generates an index.html file with links to all exported HTML conversation files.
+        """
+        template_path = os.path.join('templates', 'index.html')
+
+        # Read the index template HTML
+        with open(template_path, 'r', encoding='utf-8') as file:
+            index_template = file.read()
+
+        rows = ""
+        for conversation in all_conversations:
+            date = datetime.fromtimestamp(conversation.create_time).strftime(Conversation.TIME_FORMAT)
+            row = f"""
+            <tr>
+                <td><a href="{conversation.id}.html">View Conversation</a></td>
+                <td>{date}</td>
+                <td>{conversation.title}</td>
+            </tr>
+            """
+            rows += row
+
+        index_html = index_template.replace("<!-- insert rows here -->", rows)
+
+        with open(os.path.join(self.EXPORT_PATH, 'index.html'), 'w', encoding='utf-8') as file:
+            file.write(index_html)
+
+        print('index.html generated successfully.')
 
     # inspect
     ###########################################################################
