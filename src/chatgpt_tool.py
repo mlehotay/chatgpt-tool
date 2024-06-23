@@ -634,7 +634,7 @@ class ChatGPTTool:
         terminal_size = shutil.get_terminal_size(fallback=(80, 24))
         return terminal_size.columns - 3  # Subtract 3 to account for ellipsis
 
-    def print_conversation(self, db_name, prefixes, style, file_handle=sys.stdout):
+    def print_conversations(self, db_name, prefixes, style, file_handle=sys.stdout):
         """
         Prints conversations from the SQLite database filtered by prefixes and style.
         """
@@ -849,26 +849,59 @@ class ChatGPTTool:
 
         conn.close()
 
-    def export_conversations_as_json(self, cursor, conversation_ids):
-        for conversation in conversation_ids:
+    def export_conversations_as_json(self, cursor, all_conversations):
+        for conversation in all_conversations:
             output_file = os.path.join(self.EXPORT_PATH, f"{conversation.id}.json")
             if self.verbose:
                 print(f"Exporting {conversation} to {output_file}")
             with open(output_file, 'w', encoding='utf-8') as file_handle:
                 self.print_single_conversation(cursor, conversation, 'json', file_handle)
 
-    def export_conversations_as_html(self, cursor, conversation_ids):
-        for conversation in conversation_ids:
-            output_file = os.path.join(self.EXPORT_PATH, f"{conversation.id}.html")
-            if self.verbose:
-                print(f"Exporting {conversation} to {output_file}")
-            with open(output_file, 'w', encoding='utf-8') as file_handle:
-                file_handle.write("<html><body><pre>")
-                self.print_single_conversation(cursor, conversation, 'html', file_handle)
-                file_handle.write("</pre></body></html>")
+    def export_conversations_as_html(self, cursor, all_conversations):
+        """
+        Exports the given conversations to separate HTML files.
+        """
+        for conversation in all_conversations:
+            self.export_single_conversation_as_html(cursor, conversation)
 
-    def export_conversations_as_plain_text(self, cursor, conversation_ids):
-        for conversation in conversation_ids:
+    def export_single_conversation_as_html(self, cursor, conversation):
+        """
+        Exports a single conversation to an HTML file.
+        """
+
+        # Read template HTML, styles, & script
+        with open('templates/chat.html', 'r') as file:
+            html_template = file.read()
+        with open('assets/styles.css', 'r') as file:
+            styles = file.read()
+        with open('assets/script.js', 'r') as file:
+            script = file.read()
+
+        # Prepare the conversation data
+        full_conv = self.fetch_conversation(cursor, conversation)
+        if full_conv:
+            conv_dict = {
+                "title": conversation.title,
+                "current_node": full_conv["current_node"],
+                "mapping": ast.literal_eval(full_conv["mapping"])  # Use ast.literal_eval for safety
+            }
+            conversations_data = [conv_dict]
+
+            # Inject title, JSON data, styles, and script into the template
+            html_content = html_template.replace('<!-- insert title here -->', conversation.title)
+            html_content = html_content.replace('<!-- insert styles.css here -->', styles)
+            html_content = html_content.replace('<!-- insert [json] here -->', json.dumps(conversations_data))
+            html_content = html_content.replace('<!-- insert script.js here -->', script)
+
+            # Write the final HTML to a file
+            file_name = os.path.join(self.EXPORT_PATH, f'{conversation.id}.html')
+            with open(file_name, 'w') as file:
+                file.write(html_content)
+
+            print(f'HTML file for conversation "{conversation.id}" generated successfully.')
+
+    def export_conversations_as_plain_text(self, cursor, all_conversations):
+        for conversation in all_conversations:
             output_file = os.path.join(self.EXPORT_PATH, f"{conversation.id}.txt")
             if self.verbose:
                 print(f"Exporting {conversation} to {output_file}")
@@ -911,14 +944,6 @@ class ChatGPTTool:
                 print(f"Exported {table} table as JSON to: {output_file}")
 
         conn.close()
-
-    def generate_markdown_output(self, db_name):
-        # Generate and return Markdown output here
-        pass
-
-    def generate_html_output(self, db_name):
-        # Generate and return HTML output here
-        pass
 
     # inspect
     ###########################################################################
@@ -979,7 +1004,7 @@ class ChatGPTTool:
         elif self.args.subcommand == "export":
             exit_code = self.export_conversations(self.args.db_name, self.args.prefixes, self.args.format)
         elif self.args.subcommand == "print":
-            exit_code = self.print_conversation(self.args.db_name, self.args.prefixes, self.args.style)
+            exit_code = self.print_conversations(self.args.db_name, self.args.prefixes, self.args.style)
         elif self.args.subcommand == "inspect":
             exit_code = self.inspect_data(self.args.path)
 
