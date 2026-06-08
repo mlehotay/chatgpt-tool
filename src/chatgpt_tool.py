@@ -865,6 +865,15 @@ class ChatGPTTool:
             self.export_single_conversation_as_html(cursor, conversation)
         self.generate_index_html(all_conversations)
 
+    def escape_triple_quotes(self, data):
+        if isinstance(data, str):
+            return data.replace('"""', '\\"""').replace("'''", "\\'''")
+        elif isinstance(data, list):
+            return [self.escape_triple_quotes(item) for item in data]
+        elif isinstance(data, dict):
+            return {key: self.escape_triple_quotes(value) for key, value in data.items()}
+        return data
+
     def export_single_conversation_as_html(self, cursor, conversation):
         """
         Exports a single conversation to an HTML file.
@@ -886,12 +895,15 @@ class ChatGPTTool:
                 "current_node": full_conv["current_node"],
                 "mapping": ast.literal_eval(full_conv["mapping"])  # Use ast.literal_eval for safety
             }
-            conversations_data = [conv_dict]
+            conversations_data = [self.escape_triple_quotes(conv_dict)]
+
+            # Escape newlines in JSON data
+            json_data = json.dumps(conversations_data, separators=(',', ':'))
 
             # Inject title, JSON data, styles, and script into the template
             html_content = html_template.replace('<!-- insert title here -->', conversation.title)
             html_content = html_content.replace('<!-- insert styles.css here -->', styles)
-            html_content = html_content.replace('<!-- insert [json] here -->', json.dumps(conversations_data))
+            html_content = html_content.replace('<!-- insert [json] here -->', json_data)
             html_content = html_content.replace('<!-- insert script.js here -->', script)
 
             # Write the final HTML to a file
@@ -961,8 +973,8 @@ class ChatGPTTool:
             date = datetime.fromtimestamp(conversation.create_time).strftime(Conversation.TIME_FORMAT)
             row = f"""
             <tr>
-                <td><a href="{conversation.id}.html">View Conversation</a></td>
                 <td>{date}</td>
+                <td><a href="{conversation.id}.html">{conversation.id}</a></td>
                 <td>{conversation.title}</td>
             </tr>
             """
